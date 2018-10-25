@@ -1,0 +1,776 @@
+##################################################
+## Project: Omics Shiny Search Results Application
+## Script purpose: Supporting functions for the app
+## Date: 23.08.2018
+## Author: Ashleigh Myall
+##################################################
+
+
+
+# -------------------------------------------------------------------
+
+### Code that controls Global variable of the string for locations when passing by URL - see functions get URLs
+
+# For example will be the form of http://pgb.liv.ac.uk/~andrew/crowdsource-server/src/public_html/results/  ***ID*** /psm.mzid
+firstPartURL <- "http://pgb.liv.ac.uk/~andrew/crowdsource-server/src/public_html/results"
+psmFileType <- "psm.mzid"
+locationCsvName <- "locations.csv"
+
+
+# -------------------------------------------------------------------
+
+### Function to return a subsetted dataframe with new columns calculating
+
+# for statistical anal. Takes only one column of the orignal data frame ('FP')
+# which is used to determine between Decoys & hits and takes the string
+# used to class the FP rows (default = 'DECOY')
+
+get_df_stat <- function(df_FP_only, decoy_string){
+  df_FP_only <- data.frame(df_FP_only)
+  colnames(df_FP_only) <- c("Accession")
+  df_FP_only <- transform(df_FP_only, FP = ifelse(grepl(decoy_string, Accession),1,0))  # Add an FP column which represents is a DECOY or hit, 1 for decoys
+  df_FP_only <- transform(df_FP_only, Decoy = ifelse(grepl(decoy_string, Accession),"Decoy","Target")) # Add another column for Decoy or Target
+  df_FP_only[,"Cum.FP"] <- cumsum(df_FP_only$FP) # Add cumulative column to the data frame
+  df_FP_only$Hits.Above.Tresh <- seq(1,nrow(df_FP_only),1) # Add a column for the num of hits above a thresh
+  df_FP_only <- transform(df_FP_only, TP = Hits.Above.Tresh - 2*Cum.FP)  # Add a column for TP which is = Hits.Above.Tresh - 2*Cum.FP
+  df_FP_only <- transform(df_FP_only, FDR = Cum.FP / (TP  + Cum.FP)) # Add Column for FDR
+  df_FP_only$Q.val <- return_Q_Val(df_FP_only$FDR,nrow(df_FP_only))  # Add a column for the Q value
+  return(df_FP_only)
+}
+
+# -------------------------------------------------------------------
+
+### Stats function where there exists an isDecoy Col
+
+# Same as previous but uses the isDecoy column instead of regular expressions to identify decoys
+
+getStatsDfExistingDecoy <- function(df_FP_only){
+  
+  df_FP_only <- data.frame(df_FP_only)
+  colnames(df_FP_only) <- c("isDecoy")
+  df_FP_only <- transform(df_FP_only, FP = ifelse(isDecoy,1,0))
+  df_FP_only <- transform(df_FP_only, Decoy = ifelse(isDecoy,"Decoy","Target"))
+  df_FP_only$isDecoy <- NULL
+  df_FP_only[,"Cum.FP"] <- cumsum(df_FP_only$FP)
+  df_FP_only$Hits.Above.Tresh <- seq(1,nrow(df_FP_only),1)
+  df_FP_only <- transform(df_FP_only, TP = Hits.Above.Tresh - 2*Cum.FP)
+  df_FP_only <- transform(df_FP_only, FDR = Cum.FP / (TP  + Cum.FP))
+  df_FP_only$Q.val <- return_Q_Val(df_FP_only$FDR,nrow(df_FP_only))
+  return(df_FP_only)
+}
+
+# -------------------------------------------------------------------
+
+### Function to calculate the column for Q value
+
+# Cycles through taking the current position to the end selecting the
+# min value from FDR.                                                   
+
+return_Q_Val <- function(dataCol,n){
+  return_col <- rep(0,n)
+  for(i in 1:n){
+    return_col[i] <- min(dataCol[i:n])
+  }
+  return(return_col)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to count the cleavages in each entry row
+
+# Returns a column of the num of cleavages in the adjacent column
+
+get_pep_cleav <- function(peptides_to_process){
+  clev_df <- data.frame(peptides_to_process) #create the functions internal dataframe to handle 
+  colnames(clev_df) <- c("Peptide")
+  clev_df <- transform(clev_df, mod_p = gsub("^R|^K","A", Peptide)) #create a new column cutting the front off of any matching peptides
+  clev_df <- transform(clev_df, mod_p_2 = gsub("R$|K$","A", mod_p)) #Create a new column cutting the end off of any matching peptides
+  clev_df <- transform(clev_df, mod_p_3 = gsub("KP","A", mod_p_2)) #Create a col replacing where K followed by a P so not identified as a cleav
+  clev_df <- transform(clev_df, pep_clev_count = str_count(mod_p_3,"R|K")) #Create a new col which has a count of the number of strings with a space seperating them
+  return(clev_df$pep_clev_count)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to get the current data Set
+
+# Takes the file target and returns the first proccesed daataframe for use. It returns a list, first component is 
+# the peptide list and second is the modication dataframe. This function autodetects file type and handles acordingly
+
+get_current_dataSet <- function(in_File,passedUrlData,queryLen){
+  # Selecting from the default or the uploaded
+  if (is.null(in_File)&(length(queryLen)<1)){ # if both no file has been uploaded and no file passed by the url
+    returnList <- list("pep" = NULL, "mod" = NULL) #Return data as a list without mods
+    return(returnList) # give the default dataSet
+    
+  }else{
+    #if no file has been uploaded and there is a passed URL file, then set in_File to the passedUrl and validate
+    if(is.null(in_File)&(length(queryLen)>=1)){
+      
+      
+      ## If a CSV handle as a CSV and if mzIdentML handle acccordingly
+      if(grepl("mzid",passedUrlData)|grepl(".gz",passedUrlData)){
+        
+        
+        progress <- shiny::Progress$new()
+        on.exit(progress$close())
+        progress$set(message = "Getting URL Data", value = 0.99)
+        
+        #save the URL to www file
+        download.file(url=passedUrlData,"./dat/urlMzIdentML.mzid" )
+        
+        #set the address ofthe file to be in the www folder
+        
+        #with the mzid psm list we filter the mod file by the same logiv using the spectrum ID of the filtered psm list
+        filteredPsm <- handleFileMzid('./dat/urlMzIdentML.mzid')
+        
+        returnList <- list("pep" = filteredPsm, "mod" = getMzidMod('./dat/urlMzIdentML.mzid',filteredPsm))
+        file.remove('./dat/urlMzIdentML.mzid') # delete the temp file
+        return(returnList)
+        
+      }else{
+        #else assume we are being passed a csv
+        peptideDf <- get_url_dat(passedUrlData)
+        returnList <- list("pep" = peptideDf, "mod" = getModCsv(peptideDf))
+        return(returnList)
+      }
+      
+    }
+    #check in File
+    if(validate_file(in_File)){
+      if(grepl("csv",in_File$datapath)){
+        peptideDf <- handleFileCsv(in_File)
+        returnList <- list("pep" = peptideDf, "mod" = getModCsv(peptideDf))
+        return(returnList)
+        
+      }else if(grepl("mzid",in_File$datapath)){ #IF .mzid
+        
+        filteredPsm <- handleFileMzid(in_File$datapath)
+        
+        returnList <- list("pep" = filteredPsm, "mod" = getMzidMod(in_File$datapath,filteredPsm))
+        return(returnList)
+      }else{
+        #na (gzip currently which is handled the same as mzid)
+        
+        filteredPsm <- handleFileMzid(in_File$datapath)
+        
+        returnList <- list("pep" = filteredPsm, "mod" = getMzidMod(in_File$datapath,filteredPsm))
+        return(returnList)
+      }
+      
+    }else{
+      shinyalert(title = "Bad upload file!",text = "Please upload a file of: .csv .mzid .gz", type = "warning")
+      
+      returnList <- list("pep" = NULL, "mod" = NULL)
+      return(returnList) # give the default dataSet
+    }
+  }
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to create a new dataframe for behinds the scenes which has the score set, has been ordered by score
+
+# This creates the servers version of the data frame with a few exra cols, and also ordered by score as needed by the
+# stats function for calcualted FDR correctly. It takes the column to set to score as an arguement. An original version
+# of the primary dataSet is passed each time to this function so that mutliple columns aren't renamed score.
+
+get_dataSet_withScore <- function(df_to_use,selected_col){
+  try(df_to_use <- transform(df_to_use, z = round(Mass / m.z))) #Create a new column of Charge
+  try(df_to_use <- transform(df_to_use, Mass = round(z * m.z))) #Create a new column of Charge
+  try(df_to_use <- transform(df_to_use, ppm = round(ppm,digits = 4))) #Round the ppm col to 4dp
+  colnames(df_to_use)[colnames(df_to_use)==selected_col] <- "Score" #set the score column
+  df_to_use <- df_to_use[rev(order(df_to_use$Score)),] #order by score
+  df_to_use$counted_cleavages <- as.factor(get_pep_cleav(df_to_use$Peptide)) # Count the cleavages and add to the data set as a new column
+  
+  #replace spectrum ID to just numeric
+  df_to_use <- transform(df_to_use, ID = as.numeric(gsub("index=","",spectrumID)))
+  return(df_to_use)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return min, max and a default of the score range
+
+get_score_range <- function(df_to_use){
+  rang <- c(min(df_to_use$pep$Score),max(df_to_use$pep$Score))
+  return(rang)
+  
+}
+
+
+# -------------------------------------------------------------------
+
+### Function for mzid and gz file input handler:
+
+# Takes an mzid target, imports, merges across the score and peptide list, then filters by max rank=1 and subsets
+# for only unique peptide sequences - selecting the top scoring entry - where score is by default always the
+# second column of the score df. Then renames some columns and calculates ppm and gets the cleav count
+
+handleFileMzid <- function(targetFile){
+  print(targetFile)
+  mzid <- openIDfile(targetFile)
+  
+  mzid_df <- cbind(psms(mzid), score(mzid)[-1]) # col bind the two dataframes (psms with scores leaving out the specID from the score df)
+  mzid_df <- filter(mzid_df , rank == 1) #subset only rank 1
+  mzid_df <- mzid_df[-which(duplicated(mzid_df$spectrumID)),] #filter ut duplicated rows using spectrumID
+  
+  #subet for unqiue peptides
+  #colnames(mzid_df )[colnames(mzid_df )==colnames(score(mzid)[2])] <- "ScoreFilterCol"
+  #mzid_df  <- mzid_df  %>% group_by(sequence) %>% slice(which.max(ScoreFilterCol))
+  
+  #Format the cols for the app
+  colnames(mzid_df)[colnames(mzid_df)=="ScoreFilterCol"] <- colnames(score(mzid)[2])
+  mzid_df <- getFormtedColDf(mzid_df)
+  
+  # Add extra columns
+  mzid_df <- transform(mzid_df, ppm = ((m.z - calculatedMassToCharge)*1000000)/m.z) # Add a col for ppm
+  
+  return(mzid_df)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to get the modification df from mzIdenML fies
+
+getMzidMod <- function(targetFile,filteredPSM){
+  mods <- modifications(openIDfile(targetFile))
+  #filter mod df by finding join of spectrum ID
+  mods <- subset(mods,spectrumID %in% filteredPSM$spectrumID)
+  return(mods)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return the CSV dataset
+
+# Firstly the entire peptide column is set to uppercase for comparison (some inpput files were seen to have mixed).
+# Tries to detect a recognised colname for filtering the unqiue peptides by max score. If not then tries to use the
+# first column containing the string 'Score'. If no match found we do not filter - could select a peptide with the 
+# low score
+
+handleFileCsv <- function(in_File){
+  
+  uploaded_df <- read.csv(in_File$datapath, header=TRUE)
+  
+  #If the df does not contains more than 5 rows than we assume the wrong format and proceed to check for tab del with skip=0 & skip =1
+  if(!NCOL(uploaded_df) >= 5){
+    tryCatch({
+        uploaded_df <- suppressWarnings(read_delim(in_File$datapath, "\t", #This is especially for MSAmanda
+                                                   escape_double = FALSE, trim_ws = TRUE, 
+                                                   skip = 0))
+      },error = function(e) {stop(safeError(e))})# return a safeError if a parsing error occurs
+    
+    
+    if(!NCOL(uploaded_df) >= 5){
+      tryCatch({
+        uploaded_df <- suppressWarnings(read_delim(in_File$datapath, "\t", 
+                                                   escape_double = FALSE, trim_ws = TRUE, 
+                                                   skip = 1))
+      },error = function(e) {stop(safeError(e))})# return a safeError if a parsing error occurs
+      
+      
+      if(!NCOL(uploaded_df) >= 5){
+        shinyalert(title = "Warning!",text = "Could not read in CSV. Please ensure comma or tab delimited", type = "warning")
+        return(NULL) #could read in CSV
+      }
+    }
+  }
+  
+  uploaded_df <- getFormtedColDf(uploaded_df) #Rename cols
+  uploaded_df$Peptide = toupper(uploaded_df$Peptide) #upper case the enitre col
+  try(uploaded_df <- filter(uploaded_df , Rank == 1),silent = TRUE) #subset only rank 1
+  try(uploaded_df <- filter(uploaded_df , rank == 1),silent = TRUE)
+  try(uploaded_df <- uploaded_df[-which(duplicated(uploaded_df$spectrumID)),],silent = TRUE) #filter ut duplicated rows using spectrumID
+  return(uploaded_df)
+}
+
+
+# -------------------------------------------------------------------
+
+### Fucntion to filter for unique peptides
+
+# Filter for best scoring peptide sequence by score, if cannot get Score col then no filtering is done.
+
+getFilteredUniqueDfPep <- function(df){
+  if("X.10lgP" %in% colnames(df)){ #This is the general case for crowdsource data (the score col)
+    df <- df %>% group_by(Peptide) %>% slice(which.max(X.10lgP))
+  }else if(grep("Score", colnames(df))){
+    ## R makes this problamatic as it's difficutl to select a colname by a variable
+    # Soltuion: set variable column to fixed col name then return it to original name later
+    colnames <- colnames(df)
+    col_mat <- grepl("Score",colnames)
+    selected_default <- colnames[which(col_mat)]
+    colnames(df)[colnames(df)== selected_default[1] ] <- "ScoreFilterCol"
+    df <- df %>% group_by(Peptide) %>% slice(which.max(ScoreFilterCol))
+    colnames(df)[colnames(df)=="ScoreFilterCol"] <- selected_default[1]
+    
+  }else{
+    #no match found, so rather than filter at random we choose to leave
+  }
+  return(df)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to read in data from a web URL
+
+get_url_dat <- function(webAddress){
+  progress <- shiny::Progress$new()
+  on.exit(progress$close())
+  progress$set(message = "Reading in Data", value = 0.99)
+  webDat <- read.csv(url(webAddress))
+  webDat$counted_cleavages <- as.factor(get_pep_cleav(webDat$Peptide))
+  return(webDat)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to check the file uploaded is valid
+
+validate_file <- function(inputFile){
+  #First check to make sure of the right file format
+  if(grepl(".csv",inputFile$datapath)|grepl(".mzid",inputFile$datapath)|grepl(".gz",inputFile$datapath)){
+    #Contains one of the right formats
+    return(TRUE)
+  }else{
+    return(FALSE)
+  }
+}
+
+
+# -------------------------------------------------------------------
+
+### function to check if score the score column is a numeric
+
+checkScoreColNum <- function(df_to_use,selected_col){
+  colnames(df_to_use)[colnames(df_to_use)==selected_col] <- "Check" #set the score column
+  return(!is.numeric(df_to_use$Check))
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return the url correct form
+
+returnDataUrl <- function(string){
+  string <- sub("[?]","",string)
+  string <- sub("id=","",string)
+  return(paste(firstPartURL,string,psmFileType,sep = "/"))
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return the url for Server Data csv
+
+returnServerDataCsvUrl <- function(string){
+  string <- sub("[?]","",string)
+  string <- sub("id=","",string)
+  return(paste(firstPartURL,string,locationCsvName,sep = "/"))
+}
+
+
+# -------------------------------------------------------------------
+
+### Functions to check the columns required exist and if not return an error message instead of plot
+
+checkDataUploaded <- function(df){
+  validate(
+    need(is.null(df), erMessage)
+  )
+}
+
+checkColExist <- function(dfCol,erMessage){
+  validate(
+    need(dfCol != "", erMessage)
+  )
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return the current server side version of the dataset
+
+# cbinds the server dataframe with a calculated stats df for plots like FDR and Q curve.
+# function of choice depends whether the column isDecoy exists.
+
+returnCurrentServerDF <- function(current_dataSet,col,decoyString){
+  returnPepDf <- get_dataSet_withScore(current_dataSet()$pep,col) #Set the score col
+  if("isDecoy" %in% colnames(returnPepDf)){ #get the stats cols
+    statsDf <-getStatsDfExistingDecoy(returnPepDf$isDecoy)
+  }else{
+    statsDf <- get_df_stat(returnPepDf$Accession,decoyString)
+  }
+  returnPepDf <- cbind.data.frame(returnPepDf,statsDf) #Combine pep and stats df
+  returnList <- list("pep" = returnPepDf, "mod" = current_dataSet()$mod) #return all
+  return(returnList)
+  
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return numeric colnames as a list without the stats DF elements
+
+getColNames <- function(df){
+  colNames <- names(Filter(is.numeric,df)) # Get the data set with the appropriate name
+  colNames <- colNames[1:(length(colNames)-6)] # remove the last 6 cols which are ffrom the stats calc
+  return(colNames)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function for v&h line on the fdr curve
+
+vline <- function(x = 0, color = "grey") {
+  list(type = "line", y0 = 0, y1 = 1, yref = "paper",x0 = x, x1 = x, line = list(color = color))
+}
+
+hline <- function(y = 0, color = "grey") {
+  list(type = "line", x0 = 0, x1 = 1, xref = "paper",y0 = y, y1 = y, line = list(color = color))
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to get intercept
+
+# Approximates the point where FDR percent meets the FDR curve, takes two arguemnts, the df containing the FDR curve
+# and the input of FDR percentage
+
+getIntercept <- function(df,fdr){
+  intercepDF <- subset(df, Q.val > 0) #no zero interpolation
+  interCep <- approx(x = as.numeric(intercepDF$Q.val), y = as.numeric(intercepDF$TP), xout = fdr/100)
+  return(round(interCep$y))
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return a dataframe with counts of mods, only pass it a dataframe of ID and name
+
+# This counts how many mods are present per type of modification and returns a df for plotting a bar chart
+
+getModCount <- function(modificationDf,numOfPep){
+  colnames(modificationDf) <- c("spectrumID", "name")
+  uniqueMods <- unique(modificationDf[ , 1:2 ] ) #unique 
+  pepIdWithAnyMod <- data.frame(unique(modificationDf[ , 1] )) #peptide ids with any modification
+  pepWithoutMod <- numOfPep-nrow(pepIdWithAnyMod) # num of peptides with no mods
+  returnDf <- rbind.data.frame(data.frame("Var1" = "no mods", "Freq" = pepWithoutMod),as.data.frame(table(unlist(uniqueMods$name))))
+  colnames(returnDf) <- c("Modification", "Frequency")
+  return(returnDf)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return a modification dataframe for the non .mzid files (.csv) enables to treat it the same for ptm plots
+
+# Takes the modification column and spectrum ID then creates a new df where each individual mod in the PTM col
+# has its own entry with the relevant spectrum ID to be used as a key. Note: this is for processing csv into the same
+# format as mzIdentML mod dataframes
+
+getModCsv <- function(peptideDf){
+  ptmList <- as.data.frame(peptideDf$PTM) #First step is to isolate the ptm column from the peptide list
+  ptmList$spectrumID <- seq.int(nrow(ptmList)) #add an ID col
+  ptmList <- na.omit(ptmList) #remove na rows
+  colnames(ptmList) <- c("name", "spectrumID")
+  mods <- cSplit(ptmList, "name", sep = ";", direction = "long") #split so each mod is its own row
+  return(mods)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return a dataframe with the count of modifications per peptide
+
+getModCountPerPep <- function(modificationDf,numOfPep){
+  colnames(modificationDf) <- c("spectrumID", "name")
+  
+  pepIdWithAnyMod <- data.frame(unique(modificationDf$spectrumID))
+  pepWithoutMod <- numOfPep-nrow(pepIdWithAnyMod)
+  returnDf <- data.frame("Var1" = 0, "Freq" = pepWithoutMod)
+  
+  countPerPep <- as.data.frame(table(unlist(modificationDf$spectrumID)))
+  countPerNum <- as.data.frame(table(unlist(countPerPep$Freq)))
+  
+  #to delete repition remove count of 0 from the unlisted mod list
+  countPerNum <- countPerNum[countPerNum$Var1 != 0, ]
+  
+  returnDf <- rbind.data.frame(returnDf,countPerNum)
+  colnames(returnDf) <- c("Modifications", "Frequency")
+  return(returnDf)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to take a dataframe (input file) and rename the columns in a correct format
+
+# It became problatic to take files with differeing column names so here is a function to sweep through ranges
+# of potential column names and format that in an acceptable way
+
+getFormtedColDf <- function(df){
+  
+  #General .mzid names
+  try(colnames(df)[colnames(df)=="DatabaseAccess"] <- "Accession")
+  try(colnames(df)[colnames(df)=="sequence"] <- "Peptide")
+  try(colnames(df)[colnames(df)=="experimentalMassToCharge"] <- "m.z")
+  try(colnames(df)[colnames(df)=="chargeState"] <- "z")
+  
+  #MS Amanda renames
+  try(colnames(df)[colnames(df)== "Sequence" ] <- "Peptide")
+  try(colnames(df)[colnames(df)== "Protein Accessions" ] <- "Accession")
+  try(colnames(df)[colnames(df)== "Modifications" ] <- "PTM")
+  try(colnames(df)[colnames(df)== "Charge" ] <- "z")
+  
+  return(df)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return column
+
+# Checks the columns for which should be chosen as the intial scoring column
+# works from known commonly used score columns present in a range of file uploads
+
+getInitScoreCol <- function(df){
+  colnames <- names(df) # Get the data set with the appropriate name
+  
+  if(is.element("PSM.level.p.value", colnames)){
+    selected_default_vec <- colnames[which(grepl("PSM.level.p.value",colnames))]
+    return(selected_default_vec)
+  }else if(is.element("peptide.sequence.level.p.value", colnames)){
+    return(colnames[which(grepl("peptide.sequence.level.p.value",colnames))])
+  }else if(is.element("mzid.Scoring", colnames)){
+    return(colnames[which(grepl("mzid.Scoring",colnames))])
+  }else if(is.element("X.10lgP", colnames)){
+    return(colnames[which(grepl("X.10lgP",colnames))])
+  }else if("scr.PEAKS.peptideScore" %in% colnames){
+    return(colnames[which(grepl("scr.PEAKS.peptideScore",colnames))])
+  }else if("Score" %in% colnames){
+    selected_default_vec <- colnames[which(grepl("Score",colnames))]
+    return(selected_default_vec[1])
+  }else if(is.element("value", colnames)){
+    selected_default_vec <- colnames[which(grepl("value",colnames))]
+    return(selected_default_vec[1])
+  }else{
+    return(NULL)
+  }
+  return(NULL)
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to get spectrum file 
+
+# read in the spectrum file if doesnt exist return NULL
+
+getSpecFile <- function(inFile){
+  if(is.null(inFile)){
+    return(NULL)
+  }else{
+    progress <- shiny::Progress$new()
+    on.exit(progress$close())
+    progress$set(message = "Uploading MGF", value = 0.99)
+    
+    x <- readMgfData(inFile$datapath)
+    return(x)
+  }
+  
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to get a return list
+
+# Unpack the list then combine into one list to be returned by the datapage module
+
+getDataReturnList <- function(current_dataSet_server_side, current_specDataSet){
+  return(list("pep" = current_dataSet_server_side()$pep, "mod" = current_dataSet_server_side()$mod, "mgf" = current_specDataSet()))
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to return a dataframe with select columns
+
+# Use to provide a visual table for the user to select a PSM spectrum from takes input of the columns to include - then returns dataframe
+
+getSelectCols <- function(df, selectCols){
+  return(df[,selectCols])
+}
+
+
+
+
+
+
+
+
+
+# ---------------------------------------------------------------------------------
+
+### Function to return Annotated Spectrum
+
+# Takes Spectrum, fragment df and params to return a new df with an annoated col - currently only functional with b and y ions
+
+returnAnnotatedSpectrum <- function(spectrumDf, fragDf, tolBinIn, tolType,charge){
+  
+  
+  # Code to handle the different inputs - will return the m/z tolerance bin by converting
+  
+  #if daltons - code to convert 
+  if(tolType == "da"){
+    tolBin <- getDaltonBin(tolBinIn,charge)
+  }else if(tolType == "ppm"){ #if ppm - coded to handle 
+    tolBin <- getPpmBin(tolBinIn,charge)
+  }else{  #else is m/z so no conversion
+    tolBin <- tolBinIn
+  }
+  
+  
+  
+  
+  
+  
+  
+  ## For now hard code in only for B and Y ions
+  
+  ###### B ions
+  
+  # generrate an upper and a lower for the window
+  bIonsSeachRange <- returnUpperLower(fragDf$`B Ions`,tolBin)     # <----- need to code in ability to add more cols
+  
+  # for each row find if a value exists in the spectrum files m/z col
+  doesExist(bIonsSeachRange$Upper[1],bIonsSeachRange$Lower[1],spectrumDf$mz)
+  
+  highLightValueVec <- c("NA")
+  for(i in 1:nrow(bIonsSeachRange)){
+    highLightValueVec[i] <- doesExist(bIonsSeachRange$Upper[i],bIonsSeachRange$Lower[i],spectrumDf$mz)
+  }
+  
+  #Add an additional column for annotation and Mark each column with B ion
+  spectrumDf$anno <- rep("NA",nrow(spectrumDf))
+  spectrumDf$anno[which(spectrumDf$mz %in% highLightValueVec)] <- "B"
+  
+  
+  ###### Y ions
+  
+  # generrate an upper and a lower for the window
+  yIonsSeachRange <- returnUpperLower(fragDf$`Y Ions`,tolBin) 
+  
+  # for each row find if a value exists in the spectrum files m/z col
+  doesExist(yIonsSeachRange$Upper[1],yIonsSeachRange$Lower[1],spectrumDf$mz)
+  
+  highLightValueVec <- c("NA")
+  for(i in 1:nrow(yIonsSeachRange)){
+    highLightValueVec[i] <- doesExist(yIonsSeachRange$Upper[i],yIonsSeachRange$Lower[i],spectrumDf$mz)
+  }
+  
+  spectrumDf$anno[which(spectrumDf$mz %in% highLightValueVec)] <- "Y"
+  
+  
+  
+  
+  return(spectrumDf)
+}
+
+
+
+# ---------------------------------------------------------------------------------
+
+### Function to create a dataframe of upper and lower values around a column
+
+returnUpperLower <- function(column, tolBin){
+  upperCol <- column + tolBin
+  lowwerCol <- column - tolBin
+  returnDB <- data.frame("Upper" = upperCol, "Lower" = lowwerCol)
+  return(returnDB)
+}
+
+
+# ---------------------------------------------------------------------------------
+
+### Function to return closet value within a range or NA is no value exists
+
+doesExist <- function(up, low, col){
+  
+  #return rows from range
+  col <- col[col > low & col < up]
+  
+  if(length(col) == 1){
+    return(col)
+  }else if(length(col) > 1){
+    #code to select the closest value (if more than 1 row find the cloest to the midpoint of upper and lower)
+    return(col[nearestValueSearch((up+low)/2,col)])
+  }else{
+    return(NA)
+  }
+}
+
+
+# ---------------------------------------------------------------------------------
+
+### Function to find nearest value
+
+nearestValueSearch = function(x, w){
+  ## A simple binary search algo
+  ## Assume the w vector is sorted so we can use binary search
+  left = 1
+  right = length(w)
+  while(right - left > 1){
+    middle = floor((left + right) / 2)
+    if(x < w[middle]){
+      right = middle
+    }
+    else{
+      left = middle
+    }
+  }
+  if(abs(x - w[right]) < abs(x - w[left])){
+    return(right)
+  }
+  else{
+    return(left)
+  }
+}
+
+
+# ---------------------------------------------------------------------------------
+
+### Calculate the m/z bin width for a dalton input
+
+getDaltonBin <- function(daltonBin, charge){
+  return((daltonBin/1000000)/charge)
+}
+
+# ---------------------------------------------------------------------------------
+
+### Function to calculate the tolerance under ppm mode
+
+# bin number of parts per million then divided by charge 
+
+getPpmBin <- function(bin,charge){
+  return((bin/1000000)/charge)
+}
+
+
+
+
+
+
+
