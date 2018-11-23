@@ -1,7 +1,7 @@
 ##################################################
-## Project: Omics Shiny Search Results Application
+## Project: Loratario - Shiny Visualisation Application
 ## Script purpose: Plot functions
-## Date: 06.08.2018
+## Date: 06.11.2018
 ## Author: Ashleigh Myall
 ##################################################
 
@@ -127,7 +127,7 @@ plot_bar_cleav <- function(current_dataSet_server_side,decoyToggle){
   gg_to_plot <- gg_to_plot <- ggplot(data=df_to_plot, aes(Cleavages)) +
     geom_bar(fill="blue", col="blue", alpha = .2)+
     theme_bw() +
-    labs(x="Cleavages", y="Count")
+    labs(x="Missed Cleavages", y="Count")
   return(gg_to_plot)
   
 }
@@ -147,7 +147,7 @@ plot_box_clev_by_score <- function(current_dataSet_server_side,decoyToggle){
   
   checkColExist(df_to_plot$counted_cleavages, "Missing Column: Cleavages Count")
   plot_ly(df_to_plot, y = ~Score, color = ~counted_cleavages, type = "box")%>%
-    layout(xaxis = list(title = "Num Cleavages"),
+    layout(xaxis = list(title = "Num Missed Cleavages"),
            yaxis = list(title = "Score"))
 }
 
@@ -385,46 +385,178 @@ plotIdentFdr <- function(current_dataSet_server_side,fdrPercent){
 
 ## Function to plot spectrum view
 
-plotSpectrum <- function(annotatedSpec){
+plotSpectrum <- function(peptideString,annotatedSpec,ionList,annotateMissIon = FALSE,annotatePepLadder = FALSE){
   
-  #create a df for the first trace of non highlighted 
-  nonHighlighted <- annotatedSpec[ which(annotatedSpec$anno == "NA"), ]
+  #create a vector of unique items in the annotation column
+  ionsAnnoRange <- unique(annotatedSpec$anno)[!is.na(unique(annotatedSpec$anno))]
+  
+  #create a df for non annotated and add that intial trace to the plotly object
+  nonHighlighted <- annotatedSpec[ which(is.na(annotatedSpec$anno)), ]
   
   #First plot contains just the non highlighted
-  p <- plot_ly(nonHighlighted, x= ~mz,y= ~i, type = 'bar', marker = list(color = 'darkgrey'))%>%
+  p <- plot_ly(nonHighlighted)%>%
     
-    layout(title = "Peptide",
-           xaxis = list(title = "m/z"),
-           yaxis = list(title = "Intensity"))
+    add_segments(x = ~mz, xend = ~mz, y = 0, yend = ~i, showlegend = FALSE,line=list(color="grey",width = 0.5)) %>%
+    
+    layout(xaxis = list(title = "m/z",showgrid = FALSE),yaxis = list(title = "Intensity",showgrid = FALSE))
   
   
-  #Then if Bions exist add a Bions trace
-  if("B" %in% annotatedSpec$anno){
-    bIonsDf <- annotatedSpec[ which(annotatedSpec$anno == "B"), ]
-    
-    p <- p %>%
-      add_trace(x = bIonsDf$mz, y = bIonsDf$i, mode = "bar", text = bIonsDf$anno, marker = list(color = "red"), showlegend = F)%>%
-      add_text(x = bIonsDf$mz, y = bIonsDf$i, text = bIonsDf$anno, mode = 'text', color = "red", hoverinfo = 'text', 
-               marker = list(color = "red"), showlegend = F, textposition = "top right",textfont = list(color = 'red'))
+  colVec <- c("red","green","purple","orange")
+  
+  # Add a trace for where every ion should of been
+  if(annotateMissIon){
+    p <- annoMissIon(p,ionsAnnoRange,ionList,annotatedSpec,colVec,0.9*max(annotatedSpec$i))
   }
   
-  #If Yions exist add a Yions trace
   
-  if("Y" %in% annotatedSpec$anno){
-    yIonsDf <- annotatedSpec[ which(annotatedSpec$anno == "Y"), ]
-     p <- p %>%
-       add_trace(x = yIonsDf$mz, y = yIonsDf$i, mode = "bar", text = yIonsDf$anno, marker = list(color = "green"), showlegend = F)%>%
-       add_text(x = yIonsDf$mz, y = yIonsDf$i, text = yIonsDf$anno, mode = 'text', color = "green",
-                marker = list(color = "green"), showlegend = F, textposition = "top right",textfont = list(color = 'green')) 
+  
+  peptide <- toupper(peptideString)
+  
+  #Check if the ions List has the combination of ions acceptable to plot
+  if(annotatePepLadder){
+    
+    pepCharVec <- strsplit(peptide, split = "", fixed=FALSE)[[1]]
+    
+    #Check the length of the vector corresponds to the ions -- if not then no annotation 
+    if(!is.null(ionList)){
+      #p <- annoSpectrumIonLad(p,ionList,pepCharVec,max(annotatedSpec$i))
+    }
+    
+    
+  }
+  
+  
+  
+  if(length(unique(annotatedSpec$anno)) == 1){
+    return(p)
+  }
+  
+  
+  
+  #for each item which is not NA in the vector add a trace of that value to the plotly object
+  for (i in 1:length(ionsAnnoRange)) {
+    
+    ionsSubDf <- annotatedSpec[ which(annotatedSpec$anno == ionsAnnoRange[i]), ]
+    plotCol <- colVec[i]
+    
+    #combine the column for ion and position for labeling
+    ionsSubDf$anno <- ionsSubDf$anno <- paste(ionsSubDf$anno,ionsSubDf$annoPos,ionsSubDf$annoPosCharge,sep = "")
+    p <- p %>%
+      add_segments(x = ionsSubDf$mz, xend = ionsSubDf$mz, y = 0, yend = ionsSubDf$i,line=list(color=plotCol), showlegend = FALSE) %>%
+      #add_trace(x = ionsSubDf$mz, y = ionsSubDf$i, type = "bar", text = ionsSubDf$anno, marker = list(color = plotCol), showlegend = F)%>%
+      add_text(x = ionsSubDf$mz, y = ionsSubDf$i, text = ionsSubDf$anno, mode = 'text', color = plotCol,
+               showlegend = F, textposition = "top right",textfont = list(color = plotCol)) 
+    
+  }
+  
+  
+  return(p)
+}
+
+
+# -------------------------------------------------------------------
+
+## GGplot version of the spectrum - for dowloading
+
+ggplotSpec <- function(peptideString,annotatedSpec,ionList,annotateMissIon = FALSE,annotatePepLadder = FALSE){
+  
+  #create a vector of unique items in the annotation column
+  ionsAnnoRange <- unique(annotatedSpec$anno)[!is.na(unique(annotatedSpec$anno))]
+  
+  #create a df for non annotated and add that intial trace to the ggplot object
+  nonHighlighted <- annotatedSpec[ which(is.na(annotatedSpec$anno)), ]
+  
+  
+  #First plot contains just the non highlighted
+  p <- ggplot() + 
+    geom_segment(data = nonHighlighted, aes(x = mz, y = 0, xend = mz, yend = i),colour = "grey") + 
+    theme_classic()+
+    geom_hline(yintercept = 0, lty = 1)+ 
+    ggtitle(paste("Spectrum: ",peptideString)) +
+    xlab("mz") + ylab("Intensity")
+  
+  
+  colVec <- c("red","green","purple","orange")
+  # Add a trace for where every ion should of been
+  if(annotateMissIon){
+    p <- annoMissIonGG(p,ionsAnnoRange,ionList,annotatedSpec,colVec,0.9*max(annotatedSpec$i))
+  }
+  
+  
+  
+  
+  peptide <- toupper(peptideString)
+  
+  #Check if the ions List has the combination of ions acceptable to plot
+  if(annotatePepLadder){
+    
+    pepCharVec <- strsplit(peptide, split = "", fixed=FALSE)[[1]]
+    
+    #Check the length of the vector corresponds to the ions -- if not then no annotation 
+    if(length(pepCharVec) == nrow(ionList[[1]])){
+      p <- annoSpectrumIonLadGg(p,ionList,pepCharVec,max(annotatedSpec$i))
+      
+    }
+  }
+  
+  
+  
+  
+  
+  #If no other annotations return p
+  if(length(unique(annotatedSpec$anno)) == 1){
+    return(p)
+  }
+  
+  
+  
+  
+  #for each item which is not NA in the vector add a trace of that value to the plotly object
+  for (i in 1:length(ionsAnnoRange)) {
+    
+    ionsSubDf <- annotatedSpec[ which(annotatedSpec$anno == ionsAnnoRange[i]), ]
+    plotCol <- colVec[i]
+    
+    #combine the column for ion and position for labeling
+    ionsSubDf$anno <- paste(ionsSubDf$anno,ionsSubDf$annoPos,ionsSubDf$annoPosCharge,sep = "")
+    
+    
+    p = p + geom_segment(data = ionsSubDf, aes(x = mz, y = 0, xend = mz, yend = i),colour = plotCol) +
+      #geom_point(data = ionsSubDf, aes(x = mz, y = i),colour = plotCol) +
+      geom_text(data = ionsSubDf, aes(x = mz, y = (i+max(annotatedSpec$i)/15), label = anno),colour = plotCol)
+    
+    
   }
   
   
   return(p)
   
-  
 }
 
 
-# -------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

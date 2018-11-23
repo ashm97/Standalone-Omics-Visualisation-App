@@ -1,7 +1,7 @@
 ##################################################
-## Project: Omics Shiny Search Results Application
+## Project: Loratario - Shiny Visualisation Application
 ## Script purpose: Supporting functions for the app
-## Date: 23.08.2018
+## Date: 23.11.2018
 ## Author: Ashleigh Myall
 ##################################################
 
@@ -102,7 +102,7 @@ get_pep_cleav <- function(peptides_to_process){
 get_current_dataSet <- function(in_File,passedUrlData,queryLen){
   # Selecting from the default or the uploaded
   if (is.null(in_File)&(length(queryLen)<1)){ # if both no file has been uploaded and no file passed by the url
-    returnList <- list("pep" = NULL, "mod" = NULL) #Return data as a list without mods
+    returnList <- list("pep" = NULL, "mod" = NULL, "ptmrsString" = NULL) #Return data as a list without mods
     return(returnList) # give the default dataSet
     
   }else{
@@ -126,14 +126,14 @@ get_current_dataSet <- function(in_File,passedUrlData,queryLen){
         #with the mzid psm list we filter the mod file by the same logiv using the spectrum ID of the filtered psm list
         filteredPsm <- handleFileMzid('./dat/urlMzIdentML.mzid')
         
-        returnList <- list("pep" = filteredPsm, "mod" = getMzidMod('./dat/urlMzIdentML.mzid',filteredPsm))
+        returnList <- list("pep" = filteredPsm, "mod" = getMzidMod('./dat/urlMzIdentML.mzid',filteredPsm), "ptmrsString" = getPtmrsString(filteredPsm))
         file.remove('./dat/urlMzIdentML.mzid') # delete the temp file
         return(returnList)
         
       }else{
         #else assume we are being passed a csv
         peptideDf <- get_url_dat(passedUrlData)
-        returnList <- list("pep" = peptideDf, "mod" = getModCsv(peptideDf))
+        returnList <- list("pep" = peptideDf, "mod" = getModCsv(peptideDf), "ptmrsString" = getPtmrsString(peptideDf))
         return(returnList)
       }
       
@@ -142,30 +142,46 @@ get_current_dataSet <- function(in_File,passedUrlData,queryLen){
     if(validate_file(in_File)){
       if(grepl("csv",in_File$datapath)){
         peptideDf <- handleFileCsv(in_File)
-        returnList <- list("pep" = peptideDf, "mod" = getModCsv(peptideDf))
+        returnList <- list("pep" = peptideDf, "mod" = getModCsv(peptideDf), "ptmrsString" = getPtmrsString(peptideDf))
         return(returnList)
         
       }else if(grepl("mzid",in_File$datapath)){ #IF .mzid
         
         filteredPsm <- handleFileMzid(in_File$datapath)
         
-        returnList <- list("pep" = filteredPsm, "mod" = getMzidMod(in_File$datapath,filteredPsm))
+        returnList <- list("pep" = filteredPsm, "mod" = getMzidMod(in_File$datapath,filteredPsm), "ptmrsString" = getPtmrsString(filteredPsm))
         return(returnList)
       }else{
         #na (gzip currently which is handled the same as mzid)
         
         filteredPsm <- handleFileMzid(in_File$datapath)
         
-        returnList <- list("pep" = filteredPsm, "mod" = getMzidMod(in_File$datapath,filteredPsm))
+        returnList <- list("pep" = filteredPsm, "mod" = getMzidMod(in_File$datapath,filteredPsm), "ptmrsString" = getPtmrsString(filteredPsm))
         return(returnList)
       }
       
     }else{
       shinyalert(title = "Bad upload file!",text = "Please upload a file of: .csv .mzid .gz", type = "warning")
       
-      returnList <- list("pep" = NULL, "mod" = NULL)
+      returnList <- list("pep" = NULL, "mod" = NULL, "ptmrsString" = NULL)
       return(returnList) # give the default dataSet
     }
+  }
+}
+
+
+# -------------------------------------------------------------------
+
+### Function to Extract PtmRS string from columns if present
+
+# Takes the PSM list, checks for a column name - if exists collapse it and return a string for annotation
+
+getPtmrsString <- function(psmDf){
+  if("ptmRS.Result" %in% colnames(psmDf)){
+    col <- psmDf$ptmRS.Result
+    return(paste(col[col != ""], collapse = ", "))
+  }else{
+    return(NULL)
   }
 }
 
@@ -187,7 +203,7 @@ get_dataSet_withScore <- function(df_to_use,selected_col){
   df_to_use$counted_cleavages <- as.factor(get_pep_cleav(df_to_use$Peptide)) # Count the cleavages and add to the data set as a new column
   
   #replace spectrum ID to just numeric
-  df_to_use <- transform(df_to_use, ID = as.numeric(gsub("index=","",spectrumID)))
+  try(df_to_use <- transform(df_to_use, ID = as.numeric(gsub("index=","",spectrumID))))
   return(df_to_use)
 }
 
@@ -262,10 +278,10 @@ handleFileCsv <- function(in_File){
   #If the df does not contains more than 5 rows than we assume the wrong format and proceed to check for tab del with skip=0 & skip =1
   if(!NCOL(uploaded_df) >= 5){
     tryCatch({
-        uploaded_df <- suppressWarnings(read_delim(in_File$datapath, "\t", #This is especially for MSAmanda
-                                                   escape_double = FALSE, trim_ws = TRUE, 
-                                                   skip = 0))
-      },error = function(e) {stop(safeError(e))})# return a safeError if a parsing error occurs
+      uploaded_df <- suppressWarnings(read_delim(in_File$datapath, "\t", #This is especially for MSAmanda
+                                                 escape_double = FALSE, trim_ws = TRUE, 
+                                                 skip = 0))
+    },error = function(e) {stop(safeError(e))})# return a safeError if a parsing error occurs
     
     
     if(!NCOL(uploaded_df) >= 5){
@@ -285,9 +301,23 @@ handleFileCsv <- function(in_File){
   
   uploaded_df <- getFormtedColDf(uploaded_df) #Rename cols
   uploaded_df$Peptide = toupper(uploaded_df$Peptide) #upper case the enitre col
-  try(uploaded_df <- filter(uploaded_df , Rank == 1),silent = TRUE) #subset only rank 1
-  try(uploaded_df <- filter(uploaded_df , rank == 1),silent = TRUE)
-  try(uploaded_df <- uploaded_df[-which(duplicated(uploaded_df$spectrumID)),],silent = TRUE) #filter ut duplicated rows using spectrumID
+  
+  
+  #print(head(uploaded_df))
+  ## Performing filtering if the columns exist otherwise dont filter
+  
+  if("Rank" %in% colnames(uploaded_df)){
+    uploaded_df <- filter(uploaded_df , Rank == 1) #subset only rank 1
+  }
+  
+  if("rank" %in% colnames(uploaded_df)){
+    uploaded_df <- filter(uploaded_df , rank == 1)
+  }
+  
+  if("spectrumID" %in% colnames(uploaded_df)){
+    uploaded_df <- uploaded_df[-which(duplicated(uploaded_df$spectrumID)),]
+  }
+  
   return(uploaded_df)
 }
 
@@ -411,7 +441,7 @@ returnCurrentServerDF <- function(current_dataSet,col,decoyString){
     statsDf <- get_df_stat(returnPepDf$Accession,decoyString)
   }
   returnPepDf <- cbind.data.frame(returnPepDf,statsDf) #Combine pep and stats df
-  returnList <- list("pep" = returnPepDf, "mod" = current_dataSet()$mod) #return all
+  returnList <- list("pep" = returnPepDf, "mod" = current_dataSet()$mod, "ptmrsString" = current_dataSet()$ptmrsString) #return all
   return(returnList)
   
 }
@@ -481,7 +511,17 @@ getModCount <- function(modificationDf,numOfPep){
 # format as mzIdentML mod dataframes
 
 getModCsv <- function(peptideDf){
-  ptmList <- as.data.frame(peptideDf$PTM) #First step is to isolate the ptm column from the peptide list
+  
+  #Check the colnames exist otherwise return NULL
+  if("PTM" %in% colnames(peptideDf)){
+    ptmList <- as.data.frame(peptideDf$PTM) #First step is to isolate the ptm column from the peptide list
+  }else if("post" %in% colnames(peptideDf)){
+    ptmList <- as.data.frame(peptideDf$post) #First step is to isolate the ptm column from the peptide list
+  }else{
+    return(NULL)
+  }
+  
+  
   ptmList$spectrumID <- seq.int(nrow(ptmList)) #add an ID col
   ptmList <- na.omit(ptmList) #remove na rows
   colnames(ptmList) <- c("name", "spectrumID")
@@ -527,6 +567,9 @@ getFormtedColDf <- function(df){
   try(colnames(df)[colnames(df)=="sequence"] <- "Peptide")
   try(colnames(df)[colnames(df)=="experimentalMassToCharge"] <- "m.z")
   try(colnames(df)[colnames(df)=="chargeState"] <- "z")
+  try(colnames(df)[colnames(df)=="spectrumID"] <- "ID")
+  try(df$ID <- as.numeric(numextract(df$ID))) # only numeric values
+  
   
   #MS Amanda renames
   try(colnames(df)[colnames(df)== "Sequence" ] <- "Peptide")
@@ -537,6 +580,13 @@ getFormtedColDf <- function(df){
   return(df)
 }
 
+# -------------------------------------------------------------------
+
+## Function to extract numbers from a string
+
+numextract <- function(string){ 
+  str_extract(string, "\\-*\\d+\\.*\\d*")
+} 
 
 # -------------------------------------------------------------------
 
@@ -579,17 +629,64 @@ getInitScoreCol <- function(df){
 # read in the spectrum file if doesnt exist return NULL
 
 getSpecFile <- function(inFile){
-  if(is.null(inFile)){
+  
+  if(is.null(inFile$datapath)){return(NULL)}
+  
+  # <- checking that an MGF has been referenced too
+  if(identical(inFile$datapath, character(0))){
     return(NULL)
   }else{
     progress <- shiny::Progress$new()
     on.exit(progress$close())
     progress$set(message = "Uploading MGF", value = 0.99)
     
-    x <- readMgfData(inFile$datapath)
-    return(x)
+    
+    ##
+    ## Area to insert the call phpMS Command with spectrum
+    ##
+    
+    
+    ## Php Command
+    phpCom <- "php /home/sgamyall/phpMs-CLI/src/Mgf2Csv.php"
+    mgfPath <- inFile$datapath
+    #locationOut <- paste("./dat/spec",inFile$size,sep = "") #name of file dependant on size
+    locationOut <- paste("./dat/spec",MHmakeRandomString(),sep = "") #with random string after
+    
+    #delete any current files in that directory
+    #unlink("./dat/spec", recursive = TRUE)
+    
+    #print(paste(phpCom,mgfPath,locationOut, sep = " "))
+    
+    
+    try(system(paste(phpCom,mgfPath,locationOut, sep = " ")))
+    
+    
+    
+    ##
+    ##  Delete this when uploading!!!
+    ##
+    
+    #locationOut <- "./dat/spec"
+    
+    return(locationOut)
   }
   
+}
+
+# -------------------------------------------------------------------
+
+#Make random string for temp file name 
+
+MHmakeRandomString <- function(n=1, lenght=12)
+{
+  randomString <- c(1:n)                  # initialize vector
+  for (i in 1:n)
+  {
+    randomString[i] <- paste(sample(c(0:9, letters, LETTERS),
+                                    lenght, replace=TRUE),
+                             collapse="")
+  }
+  return(randomString)
 }
 
 
@@ -600,7 +697,8 @@ getSpecFile <- function(inFile){
 # Unpack the list then combine into one list to be returned by the datapage module
 
 getDataReturnList <- function(current_dataSet_server_side, current_specDataSet){
-  return(list("pep" = current_dataSet_server_side()$pep, "mod" = current_dataSet_server_side()$mod, "mgf" = current_specDataSet()))
+  return(list("pep" = current_dataSet_server_side()$pep, "mod" = current_dataSet_server_side()$mod, "mgf" = current_specDataSet(), 
+              "ptmrsString" = current_dataSet_server_side()$ptmrsString))
 }
 
 
@@ -628,66 +726,69 @@ getSelectCols <- function(df, selectCols){
 
 # Takes Spectrum, fragment df and params to return a new df with an annoated col - currently only functional with b and y ions
 
-returnAnnotatedSpectrum <- function(spectrumDf, fragDf, tolBinIn, tolType,charge){
+returnAnnotatedSpectrum <- function(spectrumDf, fragListDfs, tolBin, binType){
+  
+  #spectrumDf <- spectrum
+  
+  #fragListDfs <- ionListString
+  
+  #tolBin <- 5
+  
+  #binType <- "Da"
   
   
-  # Code to handle the different inputs - will return the m/z tolerance bin by converting
-  
-  #if daltons - code to convert 
-  if(tolType == "da"){
-    tolBin <- getDaltonBin(tolBinIn,charge)
-  }else if(tolType == "ppm"){ #if ppm - coded to handle 
-    tolBin <- getPpmBin(tolBinIn,charge)
-  }else{  #else is m/z so no conversion
-    tolBin <- tolBinIn
+  if(is.null(spectrumDf)){  #If no spectra return NULL
+    return(NULL)
   }
   
-  
-  
-  
-  
-  
-  
-  ## For now hard code in only for B and Y ions
-  
-  ###### B ions
-  
-  # generrate an upper and a lower for the window
-  bIonsSeachRange <- returnUpperLower(fragDf$`B Ions`,tolBin)     # <----- need to code in ability to add more cols
-  
-  # for each row find if a value exists in the spectrum files m/z col
-  doesExist(bIonsSeachRange$Upper[1],bIonsSeachRange$Lower[1],spectrumDf$mz)
-  
-  highLightValueVec <- c("NA")
-  for(i in 1:nrow(bIonsSeachRange)){
-    highLightValueVec[i] <- doesExist(bIonsSeachRange$Upper[i],bIonsSeachRange$Lower[i],spectrumDf$mz)
+  #create a return Df with 2 additional columns for the annotation and anno position
+  returnSpectrumDf <- spectrumDf
+  returnSpectrumDf$anno <- rep(NA,nrow(spectrumDf))
+  returnSpectrumDf$annoPos <- rep(NA,nrow(spectrumDf))
+  if(paste(names(fragListDfs[1]),"charge",sep = ".") %in% colnames(as.data.frame(fragListDfs[1]))){
+    returnSpectrumDf$annoPosCharge <- rep(NA,nrow(spectrumDf))
   }
   
-  #Add an additional column for annotation and Mark each column with B ion
-  spectrumDf$anno <- rep("NA",nrow(spectrumDf))
-  spectrumDf$anno[which(spectrumDf$mz %in% highLightValueVec)] <- "B"
+  if(is.null(fragListDfs)){return(returnSpectrumDf)}
   
-  
-  ###### Y ions
-  
-  # generrate an upper and a lower for the window
-  yIonsSeachRange <- returnUpperLower(fragDf$`Y Ions`,tolBin) 
-  
-  # for each row find if a value exists in the spectrum files m/z col
-  doesExist(yIonsSeachRange$Upper[1],yIonsSeachRange$Lower[1],spectrumDf$mz)
-  
-  highLightValueVec <- c("NA")
-  for(i in 1:nrow(yIonsSeachRange)){
-    highLightValueVec[i] <- doesExist(yIonsSeachRange$Upper[i],yIonsSeachRange$Lower[i],spectrumDf$mz)
+  # For each item in the fragment list of dfs annotate the spectrum df
+  for (j in 1:length(fragListDfs)) {
+    #set the ion name of iteration
+    ion <- names(fragListDfs)[j]
+    ionDf <- as.data.frame(fragListDfs[j])
+    if(paste(ion,"charge",sep = ".") %in% colnames(ionDf)){
+      colnames(ionDf) <- c("mz","charge","position","ion")
+    }else{
+      colnames(ionDf) <- c("mz","position","ion")
+    }
+    
+    
+    
+    #generate search bins for the ppm method
+    if(binType == "ppm"){
+      searchRange <- returnUpperLowerPpm(as.numeric(as.character(ionDf$mz)),tolBin,as.numeric(as.character(ionDf$position)))
+    }else{# generrate an upper and a lower for the window for the simple daltons 
+      searchRange <- returnUpperLower(as.numeric(as.character(ionDf$mz)),tolBin,as.numeric(as.character(ionDf$position)))
+    }
+    
+    
+    # for each row find if a value exists in the spectrum files m/z col
+    highLightValueVec <- c(NA)
+    for(i in 1:nrow(searchRange)){
+      ## annotate - which values are true between the ranges returned by the search range function
+      returnSpectrumDf$anno[which(returnSpectrumDf$mz == doesExist(searchRange$Upper[i],searchRange$Lower[i],spectrumDf$mz))] <- ion 
+      returnSpectrumDf$annoPos[which(returnSpectrumDf$mz == doesExist(searchRange$Upper[i],searchRange$Lower[i],spectrumDf$mz))] <- searchRange$position[i]
+      
+      if("charge" %in% colnames(ionDf)){ # annotate for the charge if there 
+        returnSpectrumDf$annoPosCharge[which(returnSpectrumDf$mz == doesExist(searchRange$Upper[i],searchRange$Lower[i],spectrumDf$mz))] <- "+"
+      }
+    }
+    
   }
   
-  spectrumDf$anno[which(spectrumDf$mz %in% highLightValueVec)] <- "Y"
-  
-  
-  
-  
-  return(spectrumDf)
+  return(returnSpectrumDf)
 }
+
 
 
 
@@ -695,11 +796,25 @@ returnAnnotatedSpectrum <- function(spectrumDf, fragDf, tolBinIn, tolType,charge
 
 ### Function to create a dataframe of upper and lower values around a column
 
-returnUpperLower <- function(column, tolBin){
+returnUpperLower <- function(column, tolBin, position){
   upperCol <- column + tolBin
   lowwerCol <- column - tolBin
-  returnDB <- data.frame("Upper" = upperCol, "Lower" = lowwerCol)
+  returnDB <- data.frame("Upper" = upperCol, "Lower" = lowwerCol, "position" = position)
   return(returnDB)
+}
+
+
+# ---------------------------------------------------------------------------------
+
+### Funtion to create a dataframe of upper and lower around a column for ppm
+
+returnUpperLowerPpm <- function(column, ppm, position){
+  x <- data.frame("mz" = column)
+  x <- transform(x, Upper = mz + mz* ppm/1000000)
+  x <- transform(x, Lower = mz - mz* ppm/1000000)
+  x$position <- position
+  x$mz <- NULL
+  return(x)
 }
 
 
@@ -752,11 +867,96 @@ nearestValueSearch = function(x, w){
 
 # ---------------------------------------------------------------------------------
 
-### Calculate the m/z bin width for a dalton input
+### Function to return a list of dataframes one for each ion present
 
-getDaltonBin <- function(daltonBin, charge){
-  return((daltonBin/1000000)/charge)
+returnIonDfList <- function(df){
+  
+  if(is.null(df)){
+    return(NULL)
+  }
+  
+  #rename cols <---- edit this later
+  if("charge" %in% colnames(df)){ #accoutning for a charge column
+    colnames(df) <- c("IonPos","mz","charge")
+  }else{
+    colnames(df) <- c("IonPos","mz")
+  }
+  
+  
+  df$position <- str_extract(df$IonPos, "[:digit:]+$")
+  df$ion <- str_replace(df$IonPos, "[:digit:]+$", "")
+  df$IonPos <- NULL
+  #split the first column for position and ion
+  #df <- separate(data = df, col = IonPos, into = c("ion", "position"), sep = 1)
+  
+  
+  
+  #lower case all ions
+  df$ion <- tolower(df$ion)
+  
+  #return(df)
+  
+  # Find unique values in column ion and put into a vec
+  ionListDf <- split(df, df$ion)
+  
+  return(ionListDf)
 }
+
+
+# ---------------------------------------------------------------------------------
+
+### Function to pass a string and return a dataframe for annotations
+
+getAnnoStringAsDf <- function(string){
+  
+  if(nchar(string) == 0){
+    return(NULL) #error handling for empty string
+  }
+  
+  # REmove later
+  
+  #string <- "b1+-Phospho(8): 734.29, b1+-Phospho(10): 902.38, b1+-Phospho(17): 1610.67, b2+-Phospho(3): 136.54, b2+-Phospho(5): 233.59, b2+-Phospho(8): 367.65, b2+-Phospho(26): 1301.54, b2+-Phospho(28): 1407.58, b2+-Phospho(34): 1758.75, b1+(2): 187.07"
+  
+  
+  s <-  unlist(strsplit(string, ","))
+  s <- as.data.frame(s)
+  
+  
+  #seperate for m/z
+  s <- separate(data = s, col = s, into = c("annotation", "mz"), sep = ":")
+  #convert ti numeric
+  s$mz <- as.numeric(s$mz)
+  
+  #column for charge
+  s <- transform(s, charge = ifelse(grepl("[+]",annotation),"+","-"))
+  
+  #seperate for position (n) where n is the length of ion identified 
+  s <- separate(data = s, col = annotation, into = c("anno", "position"), sep = "[(]")
+  #remove remaining close brakcet and convert to numeric
+  s <- transform(s, position = as.numeric(str_replace(position, "[)]", "")))
+  
+  #clean the -Phospho from the text
+  s <- transform(s, anno = str_replace(anno, "-Phospho", ""))
+  
+  #remove whitespace
+  s$anno <- str_replace_all(s$anno, " ", "")
+  
+  #remove the charge completely
+  s <- separate(data = s, col = anno, into = c("ion", "chargee"), sep = "[:digit:][+-]")
+  s$chargee <- NULL
+  
+  #final split after the first character
+  #s <- separate(data = s, col = anno, into = c("ion", "charge"), sep = 1)
+  
+  s$ion <- paste(s$ion,s$position,sep = "")
+  s <- s[c(1,3,4)]
+  
+  return(s)
+  
+}
+
+
+
 
 # ---------------------------------------------------------------------------------
 
@@ -764,8 +964,71 @@ getDaltonBin <- function(daltonBin, charge){
 
 # bin number of parts per million then divided by charge 
 
-getPpmBin <- function(bin,charge){
-  return((bin/1000000)/charge)
+getPpmBin <- function(bin){
+  return((bin/1000000))
+}
+
+
+# ---------------------------------------------------------------------------------
+
+### Fucntions related to the spectrum plot
+
+
+##Function to add the missing ion annotation
+
+annoMissIon <- function(p,ionsAnnoRange,ionList,annotatedSpec,colVec,plotHeight){
+  
+  returnPlot <- p
+  
+  for (j in 1:length(ionList)){
+    ionDf <- ionList[[j]]
+    
+    allIons <- data.frame("mz" = as.numeric(as.character(ionDf$mz)), "i" = rep(plotHeight,length(ionDf$mz)), "anno" = paste(ionDf$ion, ionDf$position, sep = ""))
+    
+    returnPlot <- returnPlot %>% 
+      
+      
+      
+      add_segments(x = allIons$mz, xend = allIons$mz, y = 0, yend = allIons$i,opacity = 0.25, line=list(color=colVec[j]), showlegend = FALSE) %>%
+      
+      
+      
+      
+      #add_trace(x = allIons$mz, y = allIons$i,opacity = 0.25, mode = "bar", width = 0.1, marker = list(color = colVec[j]), showlegend = F)%>%
+      
+      add_text(x = allIons$mz, y = allIons$i,opacity = 0.25, text = allIons$anno, type = 'scatter', mode = 'text', color = colVec[j],
+               marker = list(color = colVec[j],size = 0.01), showlegend = F, textposition = "top right",textfont = list(color = colVec[j])) 
+    
+  }
+  
+  return(returnPlot)
+}
+
+
+
+
+
+## GGplot rendition of the plotly function as above
+
+annoMissIonGG <- function(p,ionsAnnoRange,ionList,annotatedSpec,colVec,plotHeight){
+  
+  returnPlot <- p
+  
+  for (j in 1:length(ionList)){
+    ionDf <- ionList[[j]]
+    
+    allIons <- data.frame("mz" = as.numeric(as.character(ionDf$mz)), "i" = rep(plotHeight,length(ionDf$mz)), "anno" = paste(ionDf$ion, ionDf$position, sep = ""))
+    
+    
+    returnPlot = returnPlot +
+      geom_segment(data = allIons, aes(x = mz, y = 0, xend = mz, yend = i),alpha = 0.25,colour = colVec[j]) +
+      geom_text(data = allIons, aes(x = mz, y = i, label = anno),alpha = 0.25,colour = colVec[j], nudge_y = 1000)
+    
+    
+  }
+  
+  return(returnPlot)
+  
 }
 
 
@@ -774,3 +1037,238 @@ getPpmBin <- function(bin,charge){
 
 
 
+## Function to check if the ions combination exists 
+
+checkIonCombsExist <- function(ionsList){
+  if("b" %in% ionsList & "y" %in% ionsList){
+    return(TRUE)
+  }else if("c" %in% ionsList & "z" %in% ionsList){
+    return(TRUE)
+  }else if("a" %in% ionsList & "x" %in% ionsList){
+    return(TRUE)
+  }else{
+    return(FALSE)
+  }
+}
+
+
+
+
+## Function to annoate for the ion ladder
+
+annoSpectrumIonLad <- function(p,ionsList,pepCharVecOrg,plotHeight){
+  
+  peptideTraceFunc <- function(pObj,trace,colour,heightMult,pepCharVec,ionList){
+    
+    
+    #find a vector of positions 
+    ionPos <- as.numeric(as.character(ionList[[trace]]$mz))
+    ionLowPos <- append(ionPos, 0, after = 0)[-(1+length(ionPos))]
+    annotationPositionVec <- (ionPos + ionLowPos)/2
+    
+    #Check the num of frags == to length of pepchar vec
+    print(length(pepCharVec))
+    print(length(annotationPositionVec))
+    
+    if(length(pepCharVec) != length(annotationPositionVec)){
+      return(pObj)
+    }
+      
+    annotationStringDf <- data.frame("mz" = annotationPositionVec, "i" = rep(heightMult*plotHeight,length(pepCharVec)),"anno" = pepCharVec)
+    
+    #add trace for the peptide characters
+    pObj <- pObj %>%
+      
+      add_annotations(
+        x= annotationStringDf$mz,
+        y= annotationStringDf$i,
+        text = annotationStringDf$anno,
+        showarrow = F,
+        font = list(color = colour,
+                    size = 14)
+      )
+    
+    
+    #add trace on the same line for the breaks
+    breakDf <- data.frame("mz" = ionPos, "i" = rep(heightMult*plotHeight,length(pepCharVec)))
+    
+    pObj <- pObj %>% 
+      
+      add_annotations(
+        x= breakDf$mz,
+        y= breakDf$i,
+        text = "X",
+        showarrow = F,
+        font = list(color = colour,
+                    size = 8),
+        opacity = 0.5
+      )
+  }
+  
+  
+  
+  p <- peptideTraceFunc(p,1,'red',1.05,pepCharVecOrg,ionsList)
+  p <- peptideTraceFunc(p,2,'green',1,rev(pepCharVecOrg),ionsList)
+  
+  
+  return(p)
+  
+}
+
+
+
+## Function to annoate for the ion ladder --- GG Rendition
+
+annoSpectrumIonLadGg <- function(p,ionsList,pepCharVecOrg,plotHeight){
+  
+  peptideTraceFunc <- function(pObj,trace,colour,heightMult,pepCharVec,ionList){
+    
+    #find a vector of positions 
+    ionPos <- as.numeric(as.character(ionList[[trace]]$mz))
+    ionLowPos <- append(ionPos, 0, after = 0)[-(1+length(ionPos))]
+    annotationPositionVec <- (ionPos + ionLowPos)/2
+    
+    annotationStringDf <- data.frame("mz" = annotationPositionVec, "i" = rep(heightMult*plotHeight,length(pepCharVec)),"anno" = pepCharVec)
+    
+    #add trace for the peptide characters
+    pObj <- pObj + geom_text(data = annotationStringDf, aes(x = mz, y = i, label = anno),colour = colour)
+    
+    
+    #add trace on the same line for the breaks
+    breakDf <- data.frame("mz" = ionPos, "i" = rep(heightMult*plotHeight,length(pepCharVec)))
+    
+    pObj <- pObj + geom_text(data = breakDf, aes(x = mz, y = i, label = "X"),colour = colour,size=1)
+  }
+  
+  
+  
+  p <- peptideTraceFunc(p,1,'red',1.05,pepCharVecOrg,ionsList)
+  p <- peptideTraceFunc(p,2,'green',1,rev(pepCharVecOrg),ionsList)
+  
+  
+  return(p)
+  
+}
+
+
+# ---------------------------------------------------------------------------------
+
+### Fucntions to read in and return csv's from phpMS
+
+
+## Function to read in the spectrum for a given peptide - first check the file exists. If doesn't then return NULL
+
+getSpectrum <- function(rowSelected = 0,mgfLocation){
+  if(is.null(mgfLocation)){
+    return(NULL) #if no spectra been uploaded then return null
+  }
+  
+  #
+  # Read the csv in the location provided
+  #
+  
+  # If no selection by default return the firt row
+  if(is.null(rowSelected)){
+    spectrumID = 0
+  }else{
+    spectrumID = rowSelected$ID
+  }
+  
+  
+  #Check that the file in qeustion exists
+  if(!file.exists(paste(mgfLocation,"/spectrum_",spectrumID,".csv",sep = ""))){
+    return(NULL)
+  }else{
+    
+    
+    
+    csvSpec <- read_csv(paste(mgfLocation,"/spectrum_",spectrumID,".csv",sep = ""))
+    colnames(csvSpec) <- c("mz","i")
+    spectrum <- data.frame("mz" =  csvSpec$mz, "i" = csvSpec$i)
+    
+    return(spectrum)
+  }
+}
+
+
+
+
+## Function to read in the fragment csv
+
+# Pass it the args to call phpMS then read in the return from a destination file 
+
+getFragmentDf <- function(pepSeq,fragMeth,charge){
+  
+  #return(NULL) # <------CHANGE THIS WHEN RETURNING TO SERVER
+  
+  ##
+  ##  Need to add code so that the different charge states are accounted for
+  ##
+  
+  systemOut <- NA
+  
+  
+  # PhpMs Command
+  com <- paste("php /home/sgamyall/phpMs-CLI/src/Fragment.php", toupper(pepSeq), fragMeth, charge, sep = " ")
+  
+  try(systemOut <- system(com, intern = T))
+  
+  if(!is.na(systemOut)){
+    
+    fragDf <- as.data.frame(systemOut)
+    
+    fragDf <- separate(data = fragDf, col = systemOut, into = c("ion", "mz","amino"), sep = ",")
+    
+    fragDf$amino <- NULL
+    
+    return(fragDf)
+  }else{
+    return(NULL)
+  }
+  
+  
+  
+}
+
+
+
+
+# ---------------------------------------------------------------------------------
+
+## Code to get volumes for the shiny files button
+
+function () 
+{
+  osSystem <- Sys.info()["sysname"]
+  if (osSystem == "Darwin") {
+    volumes <- list.files("/Volumes/", full.names = T)
+    names(volumes) <- basename(volumes)
+  }
+  else if (osSystem == "Linux") {
+    volumes <- c(Computer = "/")
+    media <- list.files("/media/", full.names = T)
+    names(media) <- basename(media)
+    volumes <- c(volumes, media)
+  }
+  else if (osSystem == "Windows") {
+    volumes <- system("wmic logicaldisk get Caption", intern = T)
+    volumes <- sub(" *\\r$", "", volumes)
+    keep <- !tolower(volumes) %in% c("caption", "")
+    volumes <- volumes[keep]
+    volNames <- system("wmic logicaldisk get VolumeName", 
+                       intern = T)
+    volNames <- sub(" *\\r$", "", volNames)
+    volNames <- volNames[keep]
+    volNames <- paste0(volNames, ifelse(volNames == "", "", 
+                                        " "))
+    volNames <- paste0(volNames, "(", volumes, ")")
+    names(volumes) <- volNames
+  }
+  else {
+    stop("unsupported OS")
+  }
+  if (!is.null(exclude)) {
+    volumes <- volumes[!names(volumes) %in% exclude]
+  }
+  volumes
+}

@@ -1,7 +1,7 @@
 ##################################################
-## Project: Omics Shiny Search Results Application
+## Project: Loratario - Shiny Visualisation Application
 ## Script purpose: Page containing code for Shiny Modules
-## Date: 24.08.2018
+## Date: 24.11.2018
 ## Author: Ashleigh Myall
 ##################################################
 
@@ -37,9 +37,11 @@ dataPageInput <- function(id) {
                         ),
                tabPanel("Spectrum",
                         # Input: Select a Spectrum file ----
-                        fileInput(ns("file_spec"), "Choose File",
+                        #shinyFilesButton(ns("file_spec"), "Choose File", "Please select a mgf", multiple = FALSE)
+                        fileInput(ns("file_spec"), "Choose File",# <<----------- This is a temp means for file uploads
                                   multiple = FALSE,
-                                  accept = c(".mgf"))
+                                  accept = c(".mgf")),
+                        helpText("Upload an MGF spectra")
                         )
              ),
              
@@ -71,7 +73,8 @@ dataPageInput <- function(id) {
                  tabPanel('No filtering',style = 'overflow-x: scroll',       DT::dataTableOutput(ns('ex')))
                  ),
              box(title = "Output",
-                 textOutput(ns("selected_var"))
+                 verbatimTextOutput(ns("filepaths")),
+                 verbatimTextOutput(ns("mgfPath"))
              )
       )
     )
@@ -81,6 +84,9 @@ dataPageInput <- function(id) {
 ## Server Module
 dataPage <- function(input, output, session,current_dataSet_server_side) {
   ns <- session$ns
+  
+  
+  
   
   # -------------------------------------------------------------------
   
@@ -102,16 +108,29 @@ dataPage <- function(input, output, session,current_dataSet_server_side) {
   
   # -------------------------------------------------------------------
   
-  ## spectrum file upload handler
+  ## spectrum file upload handler <---- commented out opting for basic file input - problem is takes along time to upload
+  #volumes = getVolumes()
+  #volumes <- c(Home = fs::path_home(), "R Installation" = R.home(), getVolumes()())
+  #shinyFileChoose(input, "file_spec", roots = volumes, session = session)
+  
+  #current_file_mgf_upload <- reactive({
+  #  parseFilePaths(volumes, input$file_spec)
+  #})
+  
+  ## print to browser
+  output$filepaths <- renderPrint({
+    input$file_spec$datapath
+    list.files(path = "./dat")
+  })
   
   current_specDataSet <- reactive({
     getSpecFile(input$file_spec)
   })
   
-  output$selected_var <- renderText({
-    if(!is.null(input$file_spec)){paste(as(current_specDataSet()[[2]], "data.frame")[100:105, ])}
+  output$mgfPath <- renderPrint({
+    current_specDataSet()
+    input$file_spec$datapath
   })
-  
   
   # -------------------------------------------------------------------
   
@@ -474,10 +493,10 @@ cleavPageInput <- function(id){
   tagList(
     fluidRow(
       column(width = 12,
-             box(title = "Bar Graph of Cleavages",
+             box(title = "Bar Graph of Missed Cleavages",
                  plotlyPlotInput(ns("cleavBar"))
              ),
-             box(title = "Box Plot for Score Distrubution amongst cleavages",
+             box(title = "Box Plot for Score Distrubution amongst missed cleavages",
                  plotlyPlotInput(ns("cleavBox"))
              )
              ),
@@ -485,7 +504,7 @@ cleavPageInput <- function(id){
              box(width = 12,
                  status = "info", solidHeader = TRUE,
                  collapsible = TRUE,
-                 h5("Shown in the first figure is the relative count of peptide with x cleavages. Shown in the second figure is a box plot of peptides, per number of cleavages, against score.")
+                 h5("Shown in the first figure is the relative count of peptide with x missed cleavages. Shown in the second figure is a box plot of peptides, per number of missed cleavages, against score.")
                  )
              ),
       column(width = 3,
@@ -770,7 +789,17 @@ specViewInput <- function(id){
     fluidRow(column(width = 12,
                     box(title = "Spectrum View", 
                         width = 12,
-                        plotlyOutput(ns("plot"),height = 600))
+                        plotlyOutput(ns("plot"),height = 600),
+                        column(width = 1,
+                               selectInput(ns("downLoadPlotType"), "",
+                                           c("svg" = "svg",
+                                             "png" = "png",
+                                             "pdf" = "pdf"))
+                               ),
+                        column(width = 1,
+                               br(),
+                               downloadButton(ns('ggplotDown'),"Download"))
+                               )
                     ),
              column(width = 8,box(width = 12,
                                   tabPanel('No filtering',style = 'overflow-x: scroll', DT::dataTableOutput(ns('psmTable')))
@@ -778,45 +807,31 @@ specViewInput <- function(id){
              column(width = 4,
                     tabBox(width = 12,
                            title = "Annotation Method",
-                           id = "tabsetAnno", height = "500px",
+                           id = "tabsetAnno", height = "350px",
                            
                            
                            tabPanel("Fragment Generator",
-                                    column(width = 8,
+                                    column(width = 12,
                                            box(width = 12,
                                                uiOutput(ns("peptideSeqText")) # changes for selected row
                                            )
                                     ),
-                                    column(width = 4,
+                                    column(width = 6,
                                            box(width = 12,
-                                               uiOutput(ns("chargeNumeric")) # changes for selected row charge
+                                               selectInput(ns("charge"), "Charge",
+                                                           c("1" = 1,
+                                                             "2" = 2)) # changes for selected row charge
                                            )
                                     ),
-                                    column(width = 8,
-                                           box(width = 12,
-                                               column(width = 6,textInput(ns("modsAlpha"), "Modification", "T")),
-                                               column(width = 6, numericInput(ns("charge"), "", 79, min = 1, max = 100))
-                                           )),
-                                    column(width = 4,
+                                    column(width = 6,
                                            box(width = 12,
                                                selectInput(ns("fragMeth"), "Fragment Method:",
-                                                           c("CID" = "cid",
-                                                             "HCD" = "hcd",
-                                                             "ECD" = "ecd",
-                                                             "ETD" = "etd",
-                                                             "CTD" = "ctd",
-                                                             "EDD" = "edd",
-                                                             "NETD" = "netd",
-                                                             "ETHCD" = "ethcd"))
-                                           )
-                                    ),
-                                    column(width = 8,
-                                           box(width = 12,
-                                               column(width = 6,numericInput(ns("tol"), "Tolerance", 0.5, min = 0.001, max = 100,step = 0.1)),
-                                               column(width = 6,selectInput(ns("tolType"), "",
-                                                                            c("M/z" = "mz",
-                                                                              "PPM" = "ppm",
-                                                                              "Da" = "da")))
+                                                           c("CID" = "CID",
+                                                             "HCD" = "HCD",
+                                                             "ETD" = "ETD",
+                                                             "CTD" = "CTD",
+                                                             "EDD" = "EDD",
+                                                             "NETD" = "NETD"))
                                            )
                                     ),
                                     column(width=6,actionButton(ns("genFragButton"), "Generate Fragments"))
@@ -824,21 +839,29 @@ specViewInput <- function(id){
                            
                            
                            tabPanel("String",
-                                    box(width = 12,textInput(ns("annoString"), "Annotation String", "b1+-Phospho(8): 734.29, b1+-Phospho(10): 902.38, b1+-Phospho(17): 1610.67, b2+-Phospho(3): 136.54, b2+-Phospho(5): 233.59, b2+-Phospho(8): 367.65, b2+-Phospho(26): 1301.54, b2+-Phospho(28): 1407.58, b2+-Phospho(34): 1758.75, b1+(2): 187.07")),
-                                    column(width = 8,
-                                           box(width = 12,
-                                               column(width = 6,numericInput(ns("tol"), "Tolerance", 0.5, min = 0.001, max = 100,step = 0.1)),
-                                               column(width = 6,selectInput(ns("tolType"), "",
-                                                                            c("M/z" = "mz",
-                                                                              "PPM" = "ppm",
-                                                                              "Da" = "da")))
-                                           )
-                                    ),
+                                    box(width = 12,uiOutput(ns("stringAnnoText"))),
                                     column(width = 6,actionButton(ns("genStringAnnoButton"), "Generate Annotations"))
                                     
                                     
                            )
                     ),
+                    box(width = 12, title = "Spectrum Setting",
+                        column(width = 5,
+                               box(width = 12,
+                                   checkboxInput(ns("missedFrags"), label = "Missed Fragments", value = FALSE),
+                                   checkboxInput(ns("annoPepLad"), label = "Peptide Ladder", value = FALSE)
+                                   )
+                               ),
+                        column(width = 7,
+                               box(width = 12,
+                                   column(width = 6,numericInput(ns("tol"), "Tolerance", 0.02, min = 0.0001, max = 100,step = 0.01)),
+                                   column(width = 6,selectInput(ns("tolType"), "",
+                                                                c("Da" = "da",
+                                                                  "PPM" = "ppm")))
+                               )
+                               )
+                        
+                        ),
                     box(width = 12, title = "Fragments",tableOutput(ns("view")))
                     ),
              box(verbatimTextOutput(ns('selRowPep')))
@@ -848,37 +871,107 @@ specViewInput <- function(id){
 }
 
 
+
 specView <- function(input, output, session, current_dataSet_server_side){
   ns <- session$ns
   
-  #
-  # Temp section will be replaced by a reacitve cond to link to fragment gen box calling on phpMS
-  #
+  # -------------------------------------------------------------------
+  
+  # When the client ends the session, suspend the observer and
+  # remove the spec file directory
+  session$onSessionEnded(function() {
+    #remove the spectrum NEED TO CODE
+    if(!is.null(current_dataSet_server_side()$mgf)){
+      #phpCom <- "rm -r"
+      #filePath <- current_dataSet_server_side()$mgf
+      #try(system(paste(phpCom,filePath, sep = " ")))
+    }
+  })
   
   
-  fragmentDf <- read_excel("dat/LAADEEENADNNMK.xlsx")
-  spectrum <- readRDS('./dat/spectrumLAADEEENADNNMK.rds')
   
+  
+  
+  #Reactive Conds to read in the dataframes for plotting & annotating
+  spectrum <- reactive({
+    if(!file.exists(current_dataSet_server_side()$mgf)){ #if the file exists stop running checks
+      invalidateLater(millis = 1000, session = getDefaultReactiveDomain())
+    }
+    getSpectrum(rowSelected(),current_dataSet_server_side()$mgf)
+  })
+  
+  
+  
+  
+  
+  
+  
+  phpMSFragmentDf <- reactive({
+    input$genFragButton # weight for the gen button to be pressed before running
+    getFragmentDf(isolate(input$peptideSeq),isolate(input$fragMeth),isolate(input$charge))
+  })
+  
+
+  # -------------------------------------------------------------------
+  
+  v <- reactiveValues(choice = 0)
+  
+  #Buttons to change the inout by default will be set to PhpMs
+  observeEvent(input$genFragButton, {
+    v$choice = 1
+  })
+  
+  observeEvent(input$genStringAnnoButton, {
+    v$choice = 2
+  })  
   
   
   
   # Reactice conductor to return a df of the spectrum df with annotations, only updates when button pressed
-  
   annotatedSpec <- reactive({
-    
     # Take a dependency on input$genFragButton
     input$genFragButton
+    input$genStringAnnoButton
     
-    returnAnnotatedSpectrum(spectrum,fragmentDf,isolate(input$tol),isolate(input$tolType),isolate(input$charge)) # need to change to reactive for bin width (hard coded as 5 m/z)
+    if(v$choice == 0){
+      return(returnAnnotatedSpectrum(spectrum(),NULL,input$tol,input$tolType)) #returns un anno but correct format
+    }
+    if(v$choice == 1){
+      returnAnnotatedSpectrum(spectrum(),isolate(returnIonDfList(phpMSFragmentDf())),input$tol,input$tolType)
+    }else{
+      returnAnnotatedSpectrum(spectrum(),returnIonDfList(getAnnoStringAsDf(input$annoString)),input$tol,input$tolType)
+    }
   })
   
   
   
+  # Reactice conductor to return a df of the ionList, only updates when button pressed
+  ionListCurrent <- reactive({
+    # Take a dependency on input$genFragButton
+    input$genFragButton
+    input$genStringAnnoButton
+    if(v$choice == 0){
+      return(NULL)
+    }else if(v$choice == 1){
+      returnIonDfList(phpMSFragmentDf())
+    }else{ #error handling for an empty charcter string entry
+      returnIonDfList(getAnnoStringAsDf(input$annoString))
+    }
+  })
+  
+  
+  
+  # -------------------------------------------------------------------
   
   # Reactive cond for dataframe for PSM table
   psmDf <- reactive({
-    getSelectCols(current_dataSet_server_side()$pep,c("ID","Peptide","start","end","z","m.z"))[order(getSelectCols(current_dataSet_server_side()$pep,c("ID","Peptide","start","end","z","m.z"))$ID),]
-  })
+    #if the ptmr string is in the column names then also fetch this column
+    if("ptmRS.Result" %in% colnames(current_dataSet_server_side()$pep)){
+      getSelectCols(current_dataSet_server_side()$pep,c("ID","Peptide","start","end","z","m.z","ptmRS.Result"))[order(getSelectCols(current_dataSet_server_side()$pep,c("ID","Peptide","start","end","z","m.z","ptmRS.Result"))$ID),]
+    }else{
+      getSelectCols(current_dataSet_server_side()$pep,c("ID","Peptide","start","end","z","m.z"))[order(getSelectCols(current_dataSet_server_side()$pep,c("ID","Peptide","start","end","z","m.z"))$ID),]
+    }
+    })
   
   
   
@@ -897,6 +990,7 @@ specView <- function(input, output, session, current_dataSet_server_side){
   ## Reactive cond for the row selected in the table
   rowSelected <- reactive({
     s = input$psmTable_rows_selected
+    v$choice = 0 # reset the fragment selection method back to default of nothing
     if(is.null(s)){
       return(NULL)
     }else{
@@ -905,16 +999,20 @@ specView <- function(input, output, session, current_dataSet_server_side){
     }
   })
   
+  # -------------------------------------------------------------------
   
   ## Output for selected row
   output$selRowPep = renderPrint({
-    if(is.null(rowSelected())){
-      return(NULL)
-    }else{
-      print(rowSelected()$Peptide)
-    }
+    print(phpMSFragmentDf())
+    print(ionListCurrent())
+    print(typeof(phpMSFragmentDf()))
+    print(summary(phpMSFragmentDf()))
+    print(dir("./dat"))
+    print(current_dataSet_server_side()$mgf)
+    print(current_dataSet_server_side()$ptmrsString)
   })
   
+  # -------------------------------------------------------------------
   
   ## UI output for peptide textbox
   output$peptideSeqText <- renderUI({
@@ -929,37 +1027,77 @@ specView <- function(input, output, session, current_dataSet_server_side){
   })
   
   
-  ## UI output for charge - numeric
-  output$chargeNumeric <- renderUI({
-    # If missing selected row then return with the holder of "Peptide" <---- change this to default for the first row
-    if(is.null(rowSelected())){
-      numericInput(ns("charge"), "Charge:", 1, min = 1, max = 8, step=1)
+  # -------------------------------------------------------------------
+  
+  ## UI output for string annotation text - if uploaded dataframe contains a ptmrs String then return that string in the text box as default
+  
+  #check for the row selced and if the colun of ptmrs exists, so that when different rows are selected the anno changes accordingly
+  
+  output$stringAnnoText <- renderUI({
+    #Check if a ptmrs String eixsts
+    if("ptmRS.Result" %in% colnames(current_dataSet_server_side()$pep)){
+      if(is.null(rowSelected())){
+        
+        textInput(ns("annoString"), "Annotation String", rowSelected()$ptmRS.Result)
+      }else{
+        textInput(ns("annoString"), "Annotation String", rowSelected()$ptmRS.Result)
+      }
     }else{
-      #change the text for the fragment generator to the selected row peptide
-      peptideCharge <- rowSelected()$z
-      numericInput(ns("charge"), "Charge:", peptideCharge, min = 1, max = 8, step=1)
+      textInput(ns("annoString"), "Annotation String", "b1+-Phospho(8): 734.29, b1+-Phospho(10): 902.38")
     }
   })
   
   
   
+  # -------------------------------------------------------------------
+  
   ## Plotly Output for Spectrum Visualisation
   output$plot <- renderPlotly({
-    progress <- shiny::Progress$new()
-    on.exit(progress$close())
-    progress$set(message = "Making plot", value = 0.99)
     
-    plotSpectrum(annotatedSpec())
+    if(is.null(spectrum())){ # If no spectrum return control error msg
+      validate(need(FALSE, "No Spectra "))
+    }else{
+      
+      progress <- shiny::Progress$new()
+      on.exit(progress$close())
+      progress$set(message = "Making plot", value = 0.99)
+      
+      plotSpectrum(isolate(input$peptideSeq),annotatedSpec(),ionListCurrent(),input$missedFrags,input$annoPepLad)
+      
+      
+    }
+    
   })
   
-  
+  # -------------------------------------------------------------------
   
   
   ## Output for table of fragments
   output$view <- renderTable({
-    head(fragmentDf,n=nrow(fragmentDf))
+    if(is.null(phpMSFragmentDf())){return(NULL)}else{head(phpMSFragmentDf(),n=nrow(phpMSFragmentDf()))}
   })
   
   
+  
+  # -------------------------------------------------------------------
+  
+  ##  Section Handling the GGplot rendtion download
+  
+  # Reactive holder of the plot
+  
+  ggPlotRend <- reactive({
+    return(ggplotSpec(rowSelected()$Peptide,annotatedSpec(),ionListCurrent(),input$missedFrags,input$annoPepLad))
+  })
+  
+  
+  # Download handler <- for ggplot 
+  
+  output$ggplotDown <- downloadHandler(
+    filename = function() { paste('loratarioSpectrum',Sys.Date(),"_",rowSelected()$Peptide,"_",rowSelected()$ID,".",
+                                  input$downLoadPlotType, sep='') },
+    content = function(file) {
+      ggsave(file, plot = ggPlotRend(), device = input$downLoadPlotType,width = 12,height = 4)
+    }
+  )
 }
 

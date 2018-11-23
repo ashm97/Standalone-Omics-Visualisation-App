@@ -1,7 +1,7 @@
 ##################################################
-## Project: Omics Shiny Search Results Application
+## Project: Loratario - Shiny Visualisation Application
 ## Script purpose: Global Enviroment
-## Date: 03.09.2018
+## Date: 03.11.2018
 ## Author: Ashleigh Myall
 ##################################################
 
@@ -18,6 +18,10 @@ library(splitstackshape)
 library(readr)
 library(MSnbase)
 library(readxl)
+library(tidyr)
+library(shinyFiles)
+library(fs)
+
 
 source('support/support_functions.R')
 source('support/plots.R')

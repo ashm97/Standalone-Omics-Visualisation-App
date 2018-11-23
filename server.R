@@ -1,7 +1,7 @@
 ##################################################
-## Project: Omics Shiny Search Results Application
+## Project: Loratario - Shiny Visualisation Application
 ## Script purpose: Main Server Function
-## Date: 06.08.2018
+## Date: 06.11.2018
 ## Author: Ashleigh Myall
 ##################################################
 

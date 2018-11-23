@@ -1,8 +1,8 @@
 ####################################################################################################
 ##
-## Project: Omics Shiny Search Results Application
+## Project: Loratario - Shiny Visualisation Application
 ## Script purpose: Description of Project Code
-## Date: 03.09.2018
+## Date: 03.11.2018
 ## Author: Ashleigh Myall
 ##
 ####################################################################################################

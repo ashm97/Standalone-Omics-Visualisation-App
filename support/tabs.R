@@ -1,7 +1,7 @@
 ##################################################
-## Project: Omics Shiny Search Results Application
+## Project: Loratario - Shiny Visualisation Application
 ## Script purpose: Script managing each display tab
-## Date: 06.08.2018
+## Date: 06.11.2018
 ## Author: Ashleigh Myall
 ##################################################
 
@@ -16,9 +16,10 @@ score_tab <- tabItem(tabName = "score",scorePageDisplayInput("scoreDis"))
 specView_tab <- tabItem(tabName = "specView",specViewInput("specView"))
 info_tab <- tabItem(tabName = "info",
                     box(width = 8, title = "Background",
-                        h4("The crowdsourcing search engine project has been to develop a distributed computing network that performs peptide identification by scoring MS/MS spectra against peptides derived from a protein sequence database."),
-                        h4("Developed by Andy Jones and Andrew Collins the project has hoped to share the load and compute time of large searches amongst many nodes, while maintaining similar performance to other search engines (for example: MS Amanda and MS-GF+)."),
-                        h4("Created to aid the search engine, this shiny web interface allows for easy visualising of the results, with a high degree of interactivity for data exploration. An additional feature beyond the crowdsourcing project requirements, has been the ability to upload results from a wide range of search engines. Compatibility has been a focus; both mzIdentML as well as CSV peptide search results can be uploaded and interpreted.")
+                        h4("Loratario has been developed to support visualising the results of peptide search engines and offering a connection to their original MGF spectrum file."),
+                        h4("Focused to work along side the Crowdsource search engine, Loratario also offers support for MS Amanda , MS-GF+ and others. Given a Csv of PSMs, Loratario can accept a wide range of datasets, requiring only a peptide and some form of scoring column."),
+                        h4("The developed spectrum Viewer links the PSM ID to a scan ID in the MGF and allows for annotation; either by fragment generation through phpMs or by a direct string annotation which can be manually entered."),
+                        a("https://github.com/ashm97/Standalone-Omics-Visualisation-App")
                         ),
                     box(width=4,title = "Profiles")
                     )
