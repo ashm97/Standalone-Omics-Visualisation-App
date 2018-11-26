@@ -203,7 +203,7 @@ get_dataSet_withScore <- function(df_to_use,selected_col){
   df_to_use$counted_cleavages <- as.factor(get_pep_cleav(df_to_use$Peptide)) # Count the cleavages and add to the data set as a new column
   
   #replace spectrum ID to just numeric
-  try(df_to_use <- transform(df_to_use, ID = as.numeric(gsub("index=","",spectrumID))))
+  if("spectrumID" %in% colnames(df_to_use)){try(df_to_use <- transform(df_to_use, ID = as.numeric(gsub("index=","",spectrumID))))}
   return(df_to_use)
 }
 
@@ -1193,40 +1193,92 @@ getSpectrum <- function(rowSelected = 0,mgfLocation){
 
 
 
+# ---------------------------------------------------------------------------------
+
 ## Function to read in the fragment csv
 
 # Pass it the args to call phpMS then read in the return from a destination file 
 
-getFragmentDf <- function(pepSeq,fragMeth,charge){
+getFragmentDf <- function(pepSeq,fragMeth,charge1,charge2,choice){
   
-  #return(NULL) # <------CHANGE THIS WHEN RETURNING TO SERVER
-  
-  ##
-  ##  Need to add code so that the different charge states are accounted for
-  ##
-  
-  systemOut <- NA
-  
-  
-  # PhpMs Command
-  com <- paste("php /home/sgamyall/phpMs-CLI/src/Fragment.php", toupper(pepSeq), fragMeth, charge, sep = " ")
-  
-  try(systemOut <- system(com, intern = T))
-  
-  if(!is.na(systemOut)){
-    
-    fragDf <- as.data.frame(systemOut)
-    
-    fragDf <- separate(data = fragDf, col = systemOut, into = c("ion", "mz","amino"), sep = ",")
-    
-    fragDf$amino <- NULL
-    
-    return(fragDf)
-  }else{
-    return(NULL)
+  ## Function to run & get string from php command
+  runPhpFrag <- function(pepSeq,fragMeth,charge){
+    com <- paste("php /home/sgamyall/phpMs-CLI/src/Fragment.php", toupper(pepSeq), fragMeth, charge, sep = " ")
+    print(com)
+    systemOut <- NA
+    try(systemOut <- system(com, intern = T))
+    return(systemOut)
   }
   
   
+  if(choice == 1){  # Only if the php fragment method is selected run the command
+    
+    
+    ## Run commands
+    
+    charge.one.return <- NA
+    charge.two.return <- NA
+    
+    if(charge1){
+      charge.one.return <- runPhpFrag(pepSeq,fragMeth,1)
+    }
+    
+    if(charge2){
+      charge.two.return <- runPhpFrag(pepSeq,fragMeth,2)
+    }
+    
+    
+    
+    ## Return Commands
+    
+    
+    if(!is.na(charge.one.return)&!is.na(charge.two.return)){  # If both exist combine and return
+      
+      
+      fragDf1 <- as.data.frame(charge.one.return)
+      fragDf1 <- separate(data = fragDf1, col = charge.one.return, into = c("ion", "mz","amino"), sep = ",")
+      fragDf1$amino <- NULL
+      
+      fragDf2 <- as.data.frame(charge.two.return)
+      fragDf2 <- separate(data = fragDf2, col = charge.two.return, into = c("ion", "mz","amino"), sep = ",")
+      fragDf2$amino <- NULL
+      
+      comb.Frag.Df <- rbind.data.frame(fragDf1,fragDf2)
+      
+      print("Combined fragDf")
+      print(comb.Frag.Df)
+      return(comb.Frag.Df)
+      
+      
+    }else if(is.na(charge.one.return)&!is.na(charge.two.return)){ # If only charge 1 is NA
+      
+      
+      
+      fragDf <- as.data.frame(charge.two.return)
+      fragDf <- separate(data = fragDf, col = charge.two.return, into = c("ion", "mz","amino"), sep = ",")
+      fragDf$amino <- NULL
+      return(fragDf)
+      
+      
+      
+    }else if(!is.na(charge.one.return)&is.na(charge.two.return)){ # If only charge 2 is NA
+      
+      
+      
+      fragDf <- as.data.frame(charge.one.return)
+      fragDf <- separate(data = fragDf, col = charge.one.return, into = c("ion", "mz","amino"), sep = ",")
+      fragDf$amino <- NULL
+      return(fragDf)
+      
+      
+      
+    }else{  #IF both are NA then return null to catch the no output
+      return(NULL)
+    }
+    
+  }else{
+    return(NULL)
+  }
   
 }
 

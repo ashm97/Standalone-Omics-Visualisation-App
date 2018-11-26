@@ -32,9 +32,7 @@ dataPageInput <- function(id) {
                                              ".mzid",
                                              ".gz")),
                         helpText("Accepted formats are : csv, mzid and gz. 
-                                 To be processed properly the file should contain a column labeled Peptide or Sequence."),
-                        downloadButton(ns('downloadData'), 'Download')
-                        ),
+                                 To be processed properly the file should contain a column labeled Peptide or Sequence.")                        ),
                tabPanel("Spectrum",
                         # Input: Select a Spectrum file ----
                         #shinyFilesButton(ns("file_spec"), "Choose File", "Please select a mgf", multiple = FALSE)
@@ -818,9 +816,9 @@ specViewInput <- function(id){
                                     ),
                                     column(width = 6,
                                            box(width = 12,
-                                               selectInput(ns("charge"), "Charge",
-                                                           c("1" = 1,
-                                                             "2" = 2)) # changes for selected row charge
+                                               h5("Charge"),
+                                               checkboxInput(ns("charge1"), "1", value = TRUE, width = NULL),
+                                               checkboxInput(ns("charge2"), "2", value = FALSE, width = NULL)
                                            )
                                     ),
                                     column(width = 6,
@@ -879,14 +877,14 @@ specView <- function(input, output, session, current_dataSet_server_side){
   
   # When the client ends the session, suspend the observer and
   # remove the spec file directory
-  session$onSessionEnded(function() {
+  #session$onSessionEnded(function() {
     #remove the spectrum NEED TO CODE
-    if(!is.null(current_dataSet_server_side()$mgf)){
+  #  if(!is.null(current_dataSet_server_side()$mgf)){
       #phpCom <- "rm -r"
       #filePath <- current_dataSet_server_side()$mgf
       #try(system(paste(phpCom,filePath, sep = " ")))
-    }
-  })
+  #  }
+  #})
   
   
   
@@ -894,8 +892,10 @@ specView <- function(input, output, session, current_dataSet_server_side){
   
   #Reactive Conds to read in the dataframes for plotting & annotating
   spectrum <- reactive({
-    if(!file.exists(current_dataSet_server_side()$mgf)){ #if the file exists stop running checks
-      invalidateLater(millis = 1000, session = getDefaultReactiveDomain())
+    if(!is.null(current_dataSet_server_side()$mgf)){ # dont check in the data page returns a null arguement for the mgf location
+      if(!file.exists(current_dataSet_server_side()$mgf)){ #if the file exists stop running checks
+        invalidateLater(millis = 1000, session = getDefaultReactiveDomain())
+      }
     }
     getSpectrum(rowSelected(),current_dataSet_server_side()$mgf)
   })
@@ -908,7 +908,7 @@ specView <- function(input, output, session, current_dataSet_server_side){
   
   phpMSFragmentDf <- reactive({
     input$genFragButton # weight for the gen button to be pressed before running
-    getFragmentDf(isolate(input$peptideSeq),isolate(input$fragMeth),isolate(input$charge))
+    getFragmentDf(isolate(input$peptideSeq),isolate(input$fragMeth),isolate(input$charge1),isolate(input$charge2),v$choice)
   })
   
 
@@ -1003,13 +1003,16 @@ specView <- function(input, output, session, current_dataSet_server_side){
   
   ## Output for selected row
   output$selRowPep = renderPrint({
-    print(phpMSFragmentDf())
-    print(ionListCurrent())
-    print(typeof(phpMSFragmentDf()))
-    print(summary(phpMSFragmentDf()))
-    print(dir("./dat"))
+    #print(phpMSFragmentDf())
+    #print(ionListCurrent())
+    #print(typeof(phpMSFragmentDf()))
+    #print(summary(phpMSFragmentDf()))
+    #print(dir("./dat"))
     print(current_dataSet_server_side()$mgf)
-    print(current_dataSet_server_side()$ptmrsString)
+    #print(current_dataSet_server_side()$ptmrsString)
+    #print(input$fragMeth,input$charge1,input$charge2,v$choice)
+    print(input$charge1)
+    print(input$charge2)
   })
   
   # -------------------------------------------------------------------
