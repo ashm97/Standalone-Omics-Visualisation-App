@@ -12,9 +12,9 @@
 ### Code that controls Global variable of the string for locations when passing by URL - see functions get URLs
 
 # For example will be the form of http://pgb.liv.ac.uk/~andrew/crowdsource-server/src/public_html/results/  ***ID*** /psm.mzid
-firstPartURL <- "http://pgb.liv.ac.uk/~andrew/crowdsource-server/src/public_html/results"
-psmFileType <- "psm.mzid"
-locationCsvName <- "locations.csv"
+firstPartURL <- ""#"http://pgb.liv.ac.uk/~andrew/crowdsource-server/src/public_html/results"
+psmFileType <- ""#"psm.mzid"
+locationCsvName <- ""#"locations.csv"
 
 
 # -------------------------------------------------------------------
@@ -56,6 +56,7 @@ getStatsDfExistingDecoy <- function(df_FP_only){
   df_FP_only <- transform(df_FP_only, TP = Hits.Above.Tresh - 2*Cum.FP)
   df_FP_only <- transform(df_FP_only, FDR = Cum.FP / (TP  + Cum.FP))
   df_FP_only$Q.val <- return_Q_Val(df_FP_only$FDR,nrow(df_FP_only))
+  
   return(df_FP_only)
 }
 
@@ -391,12 +392,43 @@ checkScoreColNum <- function(df_to_use,selected_col){
 
 ### Function to return the url correct form
 
-returnDataUrl <- function(string){
-  string <- sub("[?]","",string)
-  string <- sub("id=","",string)
-  return(paste(firstPartURL,string,psmFileType,sep = "/"))
-}
+#Takes the RAW URL and extracts the parameters into a string vector
 
+
+
+returnDataUrl <- function(string){
+  
+  string <- sub("[?]","",string)
+  
+  #If multiple paremeters then split the string into multiple based on the seperator &
+  if(grepl("&",string)){
+    
+    #Check that contains the correct param names
+    if(grepl("psm",string)&grepl("mgf",string)){
+      
+      #break up by the & seperator
+      paramVec <- strsplit(string,split = "&")[[1]] 
+      return(list("psm" = sub("psm=","",grep("psm",paramVec,value = T)), 
+                  "mgf" = sub("mgf=","",grep("mgf",paramVec,value = T))))
+      
+    }else{ #else return nulls
+      return(list("psm" = NULL, "mgf" = NULL))
+    }
+
+    
+  }else{
+    #if psm exists
+    if(grepl("psm",string)){
+      string <- sub("psm=","",string)
+      return(list("psm" = string, "mgf" = NULL))
+    }else if(grepl("mgf",string)){#else if mgf exists
+      string <- sub("mgf=","",string)
+      return(list("psm" = NULL, "mgf" = string))
+    }else{ #if neither exist return NULL
+      return(list("psm" = NULL, "mgf" = NULL))
+    }
+  }
+}
 
 # -------------------------------------------------------------------
 
@@ -434,11 +466,15 @@ checkColExist <- function(dfCol,erMessage){
 # function of choice depends whether the column isDecoy exists.
 
 returnCurrentServerDF <- function(current_dataSet,col,decoyString){
+  print(colnames(current_dataSet()$pep))
   returnPepDf <- get_dataSet_withScore(current_dataSet()$pep,col) #Set the score col
   if("isDecoy" %in% colnames(returnPepDf)){ #get the stats cols
     statsDf <-getStatsDfExistingDecoy(returnPepDf$isDecoy)
-  }else{
+  }else if("Accession" %in% colnames(returnPepDf)){ #Check for Accession
     statsDf <- get_df_stat(returnPepDf$Accession,decoyString)
+  }else{
+    returnList <- list("pep" = returnPepDf, "mod" = current_dataSet()$mod, "ptmrsString" = current_dataSet()$ptmrsString) #return all
+    return(returnList)
   }
   returnPepDf <- cbind.data.frame(returnPepDf,statsDf) #Combine pep and stats df
   returnList <- list("pep" = returnPepDf, "mod" = current_dataSet()$mod, "ptmrsString" = current_dataSet()$ptmrsString) #return all
@@ -601,14 +637,18 @@ getInitScoreCol <- function(df){
   if(is.element("PSM.level.p.value", colnames)){
     selected_default_vec <- colnames[which(grepl("PSM.level.p.value",colnames))]
     return(selected_default_vec)
+  }else if(is.element("Amanda.AmandaScore", colnames)){
+    return(colnames[which(grepl("Amanda.AmandaScore",colnames))])
+  }else if(is.element("MS.GF.RawScore", colnames)){
+    return(colnames[which(grepl("MS.GF.RawScore",colnames))])
+  }else if(is.element("PEAKS.peptideScore", colnames)){
+    return(colnames[which(grepl("PEAKS.peptideScore",colnames))])
   }else if(is.element("peptide.sequence.level.p.value", colnames)){
     return(colnames[which(grepl("peptide.sequence.level.p.value",colnames))])
   }else if(is.element("mzid.Scoring", colnames)){
     return(colnames[which(grepl("mzid.Scoring",colnames))])
   }else if(is.element("X.10lgP", colnames)){
     return(colnames[which(grepl("X.10lgP",colnames))])
-  }else if("scr.PEAKS.peptideScore" %in% colnames){
-    return(colnames[which(grepl("scr.PEAKS.peptideScore",colnames))])
   }else if("Score" %in% colnames){
     selected_default_vec <- colnames[which(grepl("Score",colnames))]
     return(selected_default_vec[1])
@@ -628,12 +668,18 @@ getInitScoreCol <- function(df){
 
 # read in the spectrum file if doesnt exist return NULL
 
-getSpecFile <- function(inFile){
+getSpecFile <- function(inFile,urlMgf){
   
-  if(is.null(inFile$datapath)){return(NULL)}
+  if(is.null(inFile$datapath)&is.null(urlMgf)){return(NULL)}
+  
+  #if the mgf url pathway is null then use the inFile button as the path
+  mgfPathway <- ifelse(is.null(urlMgf),inFile$datapath,urlMgf)
+  
+  
+  if(is.null(mgfPathway)){return(NULL)}
   
   # <- checking that an MGF has been referenced too
-  if(identical(inFile$datapath, character(0))){
+  if(identical(mgfPathway, character(0))){
     return(NULL)
   }else{
     progress <- shiny::Progress$new()
@@ -648,16 +694,17 @@ getSpecFile <- function(inFile){
     
     ## Php Command
     phpCom <- "php /home/sgamyall/phpMs-CLI/src/Mgf2Csv.php"
-    mgfPath <- inFile$datapath
-    #locationOut <- paste("./dat/spec",inFile$size,sep = "") #name of file dependant on size
+    mgfPath <- mgfPathway
     locationOut <- paste("./dat/spec",MHmakeRandomString(),sep = "") #with random string after
+    
+    
+    
     
     #delete any current files in that directory
     #unlink("./dat/spec", recursive = TRUE)
-    
     #print(paste(phpCom,mgfPath,locationOut, sep = " "))
     
-    
+    #run the command with the location
     try(system(paste(phpCom,mgfPath,locationOut, sep = " ")))
     
     
@@ -666,7 +713,7 @@ getSpecFile <- function(inFile){
     ##  Delete this when uploading!!!
     ##
     
-    #locationOut <- "./dat/spec"
+    #locationOut <- "./dat/spec4385fDzMYGRF"
     
     return(locationOut)
   }
@@ -697,8 +744,13 @@ MHmakeRandomString <- function(n=1, lenght=12)
 # Unpack the list then combine into one list to be returned by the datapage module
 
 getDataReturnList <- function(current_dataSet_server_side, current_specDataSet){
-  return(list("pep" = current_dataSet_server_side()$pep, "mod" = current_dataSet_server_side()$mod, "mgf" = current_specDataSet(), 
-              "ptmrsString" = current_dataSet_server_side()$ptmrsString))
+  
+  returnList <- list("pep" = current_dataSet_server_side$pep, 
+                     "mod" = current_dataSet_server_side$mod, 
+                     "mgf" = current_specDataSet, 
+                     "ptmrsString" = current_dataSet_server_side$ptmrsString)
+  
+  return(returnList)
 }
 
 
@@ -709,7 +761,8 @@ getDataReturnList <- function(current_dataSet_server_side, current_specDataSet){
 # Use to provide a visual table for the user to select a PSM spectrum from takes input of the columns to include - then returns dataframe
 
 getSelectCols <- function(df, selectCols){
-  return(df[,selectCols])
+  colnamesThatExist <- intersect(colnames(df),selectCols)
+  return(df[,colnamesThatExist])
 }
 
 

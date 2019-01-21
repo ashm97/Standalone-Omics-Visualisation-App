@@ -69,11 +69,16 @@ dataPageInput <- function(id) {
       column(width = 8,
              box(title= "Summary of Data Set",width = 12,
                  tabPanel('No filtering',style = 'overflow-x: scroll',       DT::dataTableOutput(ns('ex')))
-                 ),
-             box(title = "Output",
-                 verbatimTextOutput(ns("filepaths")),
-                 verbatimTextOutput(ns("mgfPath"))
-             )
+                 )#,
+            # box(title = "Output",
+            #     verbatimTextOutput(ns("filepaths")),
+            #     verbatimTextOutput(ns("mgfPath")),
+            #     verbatimTextOutput(ns("URLencodes")),
+            #     verbatimTextOutput(ns("queryLenL")),
+            #     verbatimTextOutput(ns("testColnamesi")),
+            #     verbatimTextOutput(ns("testColnames")),
+            #     verbatimTextOutput(ns("testColnames2"))
+             #)
       )
     )
   )
@@ -90,7 +95,7 @@ dataPage <- function(input, output, session,current_dataSet_server_side) {
   
   ## Create the conductor for uploading a dataset
   current_dataSet <- reactive({
-    get_current_dataSet(input$file1,passedUrlData(),queryLen())#Check the input type is valid - check if all checks are false
+    get_current_dataSet(input$file1,passedUrlData()$psm,queryLen())#Check the input type is valid - check if all checks are false
   })
   
   ## Create a reactive conductor to take input from the score col selector and update the current data frame with it
@@ -122,12 +127,25 @@ dataPage <- function(input, output, session,current_dataSet_server_side) {
   })
   
   current_specDataSet <- reactive({
-    getSpecFile(input$file_spec)
+    getSpecFile(input$file_spec,passedUrlData()$mgf)
   })
   
   output$mgfPath <- renderPrint({
+    #current_specDataSet()
+    input$file_spec
+  })
+  
+  output$testColnamesi <- renderPrint({
+    colnames(current_dataSet()$pep)
+  })
+  
+  output$testColnames <- renderPrint({
+    input$file_spec;
+    passedUrlData()$mgf
+  })
+  
+  output$testColnames2 <- renderPrint({
     current_specDataSet()
-    input$file_spec$datapath
   })
   
   # -------------------------------------------------------------------
@@ -175,11 +193,21 @@ dataPage <- function(input, output, session,current_dataSet_server_side) {
   ## reactive conductor to set the file pathway for 
   passedUrlData <- reactive({
     query <- session$clientData$url_search
-    query <- returnDataUrl(query)
-    paste(query) # Return a string of data
+    returnDataUrl(query) # return format is of a list currently psm & mgf <- easily add more params
   })
   
   queryLen <- reactive(({parseQueryString(session$clientData$url_search)}))
+  
+  
+  
+  #Testing output for the URL encoding
+  output$queryLenL <- renderPrint({
+    parseQueryString(session$clientData$url_search)
+  })
+  
+  output$URLencodes <- renderPrint({
+    passedUrlData()
+  })
   
   # -------------------------------------------------------------------
   
@@ -204,13 +232,14 @@ dataPage <- function(input, output, session,current_dataSet_server_side) {
   
   # -------------------------------------------------------------------
   
-  ### Final return of the server DF for other modules to access
-  
-  current_returnList <- reactive({
-    getDataReturnList(current_dataSet_server_side,current_specDataSet)
+  returnDataServerList <- reactive({
+    getDataReturnList(current_dataSet_server_side(),current_specDataSet())
   })
   
-  return(current_returnList)
+  ### Final return of the server DF for other modules to access
+  return(returnDataServerList)
+
+  
 }
 
 
@@ -302,7 +331,8 @@ singleScatPageInput <- function(id){
                collapsible = TRUE,
                h5("This plot is a Scatter where selection of the X and Y axis can be changed."),
                h5("Also available is the option to filter the score range of points displayed and separate point colour and shape by whether it is a Decoy"))
-    ))
+    )
+    )
   )
 }
 
@@ -329,6 +359,7 @@ singleScatPage <- function(input, output, session, current_dataSet_server_side){
   #Y axis selection choice
   output$choose_columns_Y <- renderUI({
     # If missing input, return to avoid error later in function
+    
     if(is.null(current_dataSet_server_side()$pep)){
       validate(need(FALSE, "No data set uploaded "))
       return()
@@ -861,8 +892,8 @@ specViewInput <- function(id){
                         
                         ),
                     box(width = 12, title = "Fragments",tableOutput(ns("view")))
-                    ),
-             box(verbatimTextOutput(ns('selRowPep')))
+                    )#,
+             #box(verbatimTextOutput(ns('selRowPep')))
       
     )
   )
@@ -967,9 +998,19 @@ specView <- function(input, output, session, current_dataSet_server_side){
   psmDf <- reactive({
     #if the ptmr string is in the column names then also fetch this column
     if("ptmRS.Result" %in% colnames(current_dataSet_server_side()$pep)){
-      getSelectCols(current_dataSet_server_side()$pep,c("ID","Peptide","start","end","z","m.z","ptmRS.Result"))[order(getSelectCols(current_dataSet_server_side()$pep,c("ID","Peptide","start","end","z","m.z","ptmRS.Result"))$ID),]
+      getSelectCols(current_dataSet_server_side()$pep,
+                    c("ID","Peptide","z","m.z","ptmRS.Result"))[order(getSelectCols(current_dataSet_server_side()$pep,
+                                                                                    c("ID","Peptide","z","m.z","ptmRS.Result"))$ID),]
+    }else if(!("Accession" %in% colnames(current_dataSet_server_side()$pep))){
+      print(colnames(current_dataSet_server_side()$pep))
+      getSelectCols(current_dataSet_server_side()$pep,
+                    c("ID","Peptide","z"))[order(getSelectCols(current_dataSet_server_side()$pep,
+                                                           c("ID","Peptide","z"))$ID),]
     }else{
-      getSelectCols(current_dataSet_server_side()$pep,c("ID","Peptide","start","end","z","m.z"))[order(getSelectCols(current_dataSet_server_side()$pep,c("ID","Peptide","start","end","z","m.z"))$ID),]
+      print(colnames(current_dataSet_server_side()$pep))
+      getSelectCols(current_dataSet_server_side()$pep,
+                    c("ID","Peptide"))[order(getSelectCols(current_dataSet_server_side()$pep,
+                                                           c("ID","Peptide"))$ID),]
     }
     })
   
@@ -1013,6 +1054,7 @@ specView <- function(input, output, session, current_dataSet_server_side){
     #print(input$fragMeth,input$charge1,input$charge2,v$choice)
     print(input$charge1)
     print(input$charge2)
+    print(current_dataSet_server_side()$mgf)
   })
   
   # -------------------------------------------------------------------
